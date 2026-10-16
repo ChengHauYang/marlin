@@ -172,3 +172,59 @@ FiniteDifferenceLaplacian::computeBuffer()
   if (_factor != 1.0)
     _u *= _factor;
 }
+
+std::vector<FDStencilEntry>
+FiniteDifferenceLaplacian::stencilAt() const
+{
+  const auto & grid_spacing = _domain.getGridSpacing();
+  std::vector<Real> dx(_dim);
+  for (unsigned int axis = 0; axis < _dim; ++axis)
+    dx[axis] = grid_spacing(axis);
+
+  return buildStencil(_dim, _radius == 2, dx, _factor);
+}
+
+std::vector<FDStencilEntry>
+FiniteDifferenceLaplacian::buildStencil(unsigned int dim,
+                                        bool wide,
+                                        const std::vector<Real> & grid_spacing,
+                                        Real factor)
+{
+  // Same coefficients used by computeBuffer() to build its convolution kernel.
+  const double c0_3 = -2.0;
+  const double c1_3 = 1.0;
+
+  const double c0_5 = -2.5;      // -5/2
+  const double c1_5 = 4.0 / 3.0; // 4/3
+  const double c2_5 = -1.0 / 12.0;
+
+  std::vector<FDStencilEntry> stencil;
+
+  const auto addAxisEntry = [&](unsigned int axis, int offset, double coeff, double dx)
+  {
+    std::vector<int> idx(dim, 0);
+    idx[axis] = offset;
+    stencil.push_back({idx, static_cast<Real>(coeff / (dx * dx) * factor)});
+  };
+
+  for (unsigned int axis = 0; axis < dim; ++axis)
+  {
+    const auto dx = grid_spacing[axis];
+    if (wide)
+    {
+      addAxisEntry(axis, 0, c0_5, dx);
+      addAxisEntry(axis, 1, c1_5, dx);
+      addAxisEntry(axis, -1, c1_5, dx);
+      addAxisEntry(axis, 2, c2_5, dx);
+      addAxisEntry(axis, -2, c2_5, dx);
+    }
+    else
+    {
+      addAxisEntry(axis, 0, c0_3, dx);
+      addAxisEntry(axis, 1, c1_3, dx);
+      addAxisEntry(axis, -1, c1_3, dx);
+    }
+  }
+
+  return stencil;
+}
