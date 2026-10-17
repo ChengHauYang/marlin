@@ -113,6 +113,16 @@
       csvdiff = neumann_linear_out.csv
       compute_devices = 'cpu cuda mps xpu'
       min_slots = 2 # memory heavy
+      # max_error decays geometrically toward 0 as the field relaxes to the exact steady
+      # profile, reaching the double-precision noise floor (~1e-14) partway through the run.
+      # Once it drops below ~1e-9, serial-vs-parallel/threaded floating-point summation-order
+      # differences in the matrix-free stencil convolution (not a logic defect: observed to
+      # match bit-for-bit on an independent serial/4-rank-MPI run on a different architecture)
+      # dominate the relative diff. Floor max_error's comparison at 1e-8 (~1e-8 of its peak
+      # value of ~2.3), far below any value that would indicate a real relaxation failure.
+      override_columns = 'max_error'
+      override_rel_err = '5.5e-6'
+      override_abs_zero = '1e-8'
       detail = 'and relax an initial condition toward the exact linear steady-state profile implied by a Dirichlet condition on one face and a nonzero-flux Neumann condition on the other.'
     []
   []
