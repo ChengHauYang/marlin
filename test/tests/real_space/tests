@@ -44,6 +44,7 @@
       input = diffusion.i
       csvdiff = diffusion_out.csv
       compute_devices = 'cpu cuda mps xpu'
+      min_slots = 2 # memory heavy
       detail = 'using a 3x3 stencil.'
     []
   []
@@ -111,6 +112,7 @@
       input = neumann_linear.i
       csvdiff = neumann_linear_out.csv
       compute_devices = 'cpu cuda mps xpu'
+      min_slots = 2 # memory heavy
       detail = 'and relax an initial condition toward the exact linear steady-state profile implied by a Dirichlet condition on one face and a nonzero-flux Neumann condition on the other.'
     []
   []
@@ -124,6 +126,7 @@
       input = robin_steady_state.i
       csvdiff = robin_steady_state_out.csv
       compute_devices = 'cpu cuda mps xpu'
+      min_slots = 2 # memory heavy
       detail = 'the elliptic Robin benchmark from the OpenGeoSys documentation (opengeosys.org/6.5.7/docs/benchmarks/elliptic/elliptic-robin).'
     []
   []
