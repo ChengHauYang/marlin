@@ -95,9 +95,11 @@
   # Neumann relaxation is slower here than the Dirichlet/Robin cases (the error
   # mode decays more slowly since both faces either float or have unit-gain
   # feedback rather than clamping to a fixed value), so more steps are needed to
-  # flatten max_error.
+  # flatten max_error. 900 steps left max_error still measurably decaying at the
+  # last timestep, close enough to the csvdiff tolerance to flip on small
+  # cross-platform differences; 1500 steps gives max_error room to plateau.
   dt = 1e-2
-  num_steps = 900
+  num_steps = 1500
 []
 
 [Outputs]
