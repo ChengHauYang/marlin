@@ -163,6 +163,14 @@ substeps = 1000
   dtmax = 300
 []
 
+[TensorOutputs]
+  [xdmf]
+    type = XDMFTensorOutput
+    buffer = 'c mu'
+    enable_hdf5 = true
+  []
+[]
+
 [Outputs]
   csv = true
   perf_graph = true
