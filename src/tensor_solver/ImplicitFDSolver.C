@@ -519,15 +519,20 @@ ImplicitFDSolver::setupPetsc(Field & field)
     const auto B = ps.coarse[levels - 2 - i];
     PetscCallAbort(comm, KSPSetOperators(smoother, B, B));
   }
-  {
-    // PCMG's default smoother is Chebyshev + SOR, but the fine shell has no SOR; use
-    // Jacobi from its diagonal there (as in the PR2b spikes). Coarse levels keep SOR.
-    KSP fine_smoother;
-    PC fine_pc;
-    PetscCallAbort(comm, PCMGGetSmoother(pc, PetscInt(levels - 1), &fine_smoother));
-    PetscCallAbort(comm, KSPGetPC(fine_smoother, &fine_pc));
-    PetscCallAbort(comm, PCSetType(fine_pc, PCJACOBI));
-  }
+  // PCMG's default smoother is Chebyshev + SOR, but the fine shell has no SOR; use
+  // Jacobi from its diagonal there (as in the PR2b spikes). On CPU the assembled
+  // coarse levels keep SOR. On CUDA they use Jacobi too: PETSc's SOR runs on the
+  // host, which costs two host/device copies per smoothing step (H200, n = 256:
+  // same 7 iterations, no copies left in KSPSolve).
+  for (const auto i : make_range(1u, levels))
+    if (i == levels - 1 || cuda)
+    {
+      KSP smoother;
+      PC smoother_pc;
+      PetscCallAbort(comm, PCMGGetSmoother(pc, PetscInt(i), &smoother));
+      PetscCallAbort(comm, KSPGetPC(smoother, &smoother_pc));
+      PetscCallAbort(comm, PCSetType(smoother_pc, PCJACOBI));
+    }
   if (field._singular && levels > 1)
   {
     // the coarse LU meets a zero pivot from the constant nullspace; shifting it changes
