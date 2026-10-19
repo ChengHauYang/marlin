@@ -27,7 +27,8 @@ FiniteDifferenceLaplacian::validParams()
 FiniteDifferenceLaplacian::FiniteDifferenceLaplacian(const InputParameters & parameters)
   : TensorOperator<torch::Tensor>(parameters),
     _radius(getParam<MooseEnum>("stencil_width") == 5 ? 2u : 1u),
-    _u_in(getInputBuffer("input", _radius)),
+    _input_name(getParam<TensorInputBufferName>("input")),
+    _u_in(getInputBufferByName(_input_name, _radius)),
     _factor(getParam<Real>("factor"))
 {
 }
@@ -181,7 +182,22 @@ FiniteDifferenceLaplacian::stencilAt() const
   for (unsigned int axis = 0; axis < _dim; ++axis)
     dx[axis] = grid_spacing(axis);
 
-  return buildStencil(_dim, _radius == 2, dx, _factor);
+  return stencilAt(dx);
+}
+
+std::vector<FDStencilEntry>
+FiniteDifferenceLaplacian::stencilAt(const std::vector<Real> & grid_spacing) const
+{
+  return buildStencil(_dim, _radius == 2, grid_spacing, _factor);
+}
+
+LinearFDOperator::Definiteness
+FiniteDifferenceLaplacian::definiteness() const
+{
+  // The discrete periodic Laplacian (3- or 5-point) is symmetric negative
+  // semidefinite with the constants as its nullspace: factor < 0 flips it to
+  // positive semidefinite.
+  return _factor < 0.0 ? Definiteness::POSITIVE_SEMIDEFINITE : Definiteness::OTHER;
 }
 
 std::vector<FDStencilEntry>
