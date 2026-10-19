@@ -208,4 +208,15 @@
       detail = 'or, with two ghost layers, when a/2 + b/(3dx) is zero.'
     []
   []
+
+  [integral_change]
+    type = CSVDiff
+    input = diffusion.i
+    cli_args = 'Postprocessors/change/type=TensorIntegralChangePostprocessor Postprocessors/change/buffer=u Outputs/file_base=diffusion_change_out'
+    csvdiff = diffusion_change_out.csv
+    compute_devices = 'cpu cuda mps xpu'
+    issues = '#122'
+    design = TensorIntegralChangePostprocessor.md
+    requirement = 'The system shall compute the integral of the change of a buffer over a time step from the owned cells only, independent of the ghost layers and the number of ranks.'
+  []
 []
