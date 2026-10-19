@@ -146,6 +146,12 @@ substeps = 1000
     type = TensorIntegralChangePostprocessor
     buffer = c
   []
+  # cumulative wall time of the tensor solves (s), excluding outputs
+  [solve_time]
+    type = PerfGraphData
+    section_name = TensorProblem::tensorSolve
+    data_type = TOTAL
+  []
 []
 
 [Problem]

@@ -182,7 +182,8 @@ TensorProblem::execute(const ExecFlagType & exec_type)
     // update time
     _sub_time = FEProblem::timeOld();
 
-    // run solver
+    // run solver (timed for the PerfGraphData postprocessor, section TensorProblem::tensorSolve)
+    TIME_SECTION("tensorSolve", 2, "Solving Tensor Problem");
     if (_solver)
       // real space solvers should do runComputeWithGhosts internally
       _solver->computeBuffer();
