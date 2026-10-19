@@ -1,6 +1,6 @@
 # Implicit FD Cahn-Hilliard size scaling
 
-Single-GPU timing of the implicit finite-difference solve of
+Single-device timing of the implicit finite-difference solve of
 `../01_spinodal_decomposition/1a_implicit_fd.i` (backward Euler, biharmonic
 implicit, double-well flux divergence explicit) for the `PETSC` (CG +
 geometric multigrid) and `TORCH_PCG` (Jacobi CG) linear solvers, on grids from
@@ -13,7 +13,13 @@ solves (`substeps`), and the `wall_time` postprocessor gives the run time.
 ```
 ./run_scaling.sh
 SIZES="1024 2048" STEPS=1 BACKENDS=PETSC ./run_scaling.sh
+DEVICE=cpu ./run_scaling.sh     # PETSc and torch on a Mac CPU
+L_TOL=1e-5 ./run_scaling.sh     # MPS, single precision (TORCH_PCG only)
 ```
+
+The device defaults to `cuda` when `nvidia-smi` is present, `mps` on macOS and
+`cpu` otherwise. The per-run time limit needs `timeout` (`gtimeout` from
+Homebrew coreutils on macOS); without it the runs are unlimited.
 
 Results go to `results/` (`summary.csv`, one log and postprocessor CSV per
 run, `provenance.txt`).

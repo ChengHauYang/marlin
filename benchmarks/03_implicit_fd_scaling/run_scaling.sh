@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Single-GPU size scaling of the implicit finite-difference Cahn-Hilliard solve
+# Single-device size scaling of the implicit finite-difference Cahn-Hilliard solve
 # (benchmarks/01_spinodal_decomposition/1a_implicit_fd.i) for the PETSC and
 # TORCH_PCG linear solvers.
 #
@@ -12,6 +12,8 @@
 # Usage (from this directory, after building marlin-opt):
 #   ./run_scaling.sh
 #   SIZES="1024 2048" STEPS=2 BACKENDS=PETSC ./run_scaling.sh
+#   DEVICE=cpu ./run_scaling.sh            # PETSc and torch on a Mac CPU
+#   L_TOL=1e-5 ./run_scaling.sh            # MPS (the default device on a Mac)
 #
 # Results: results/<backend>_<n>.{log,csv} and results/summary.csv
 
@@ -19,16 +21,45 @@ set -euo pipefail
 
 # ---- parameters -------------------------------------------------------------
 SIZES=${SIZES:-"512 1024 2048 4096 8192"}
-BACKENDS=${BACKENDS:-"PETSC TORCH_PCG"}
+# cuda if an NVIDIA GPU is present, mps on macOS, cpu otherwise
+if [ -z "${DEVICE:-}" ]; then
+  if command -v nvidia-smi > /dev/null 2>&1; then
+    DEVICE=cuda
+  elif [ "$(uname)" = Darwin ]; then
+    DEVICE=mps
+  else
+    DEVICE=cpu
+  fi
+fi
+# PETSc is not available on MPS (use DEVICE=cpu for PETSc on a Mac)
+if [ "$DEVICE" = mps ]; then
+  BACKENDS=${BACKENDS:-"TORCH_PCG"}
+else
+  BACKENDS=${BACKENDS:-"PETSC TORCH_PCG"}
+fi
 # time steps per run (each is `substeps` = 1000 linear solves, as in the input)
 STEPS=${STEPS:-2}
-DEVICE=${DEVICE:-cuda}
-# per-run limit (s); a run that hits it is reported as TIMEOUT
+# per-run limit (s); a run that hits it is reported as TIMEOUT. Needs `timeout`
+# (GNU coreutils; `gtimeout` on macOS from Homebrew coreutils), else no limit.
 TIME_LIMIT=${TIME_LIMIT:-1800}
+# optional linear tolerance, e.g. L_TOL=1e-5 on MPS (single precision cannot reach
+# the default 1e-8); unset keeps the input's default
+L_TOL=${L_TOL:-}
 MARLIN=${MARLIN:-../../marlin-opt}
 INPUT=../01_spinodal_decomposition/1a_implicit_fd.i
 OUT=results
 # -----------------------------------------------------------------------------
+
+if command -v timeout > /dev/null 2>&1; then
+  limit=(timeout "$TIME_LIMIT")
+elif command -v gtimeout > /dev/null 2>&1; then
+  limit=(gtimeout "$TIME_LIMIT")
+else
+  echo "warning: no timeout command found, runs have no time limit"
+  limit=()
+fi
+extra=()
+[ -n "$L_TOL" ] && extra+=(TensorSolver/l_tol=$L_TOL)
 
 mkdir -p "$OUT"
 summary="$OUT/summary.csv"
@@ -40,6 +71,8 @@ echo "backend,n,dofs,steps,status,wall_time_s,wall_time_per_step_s" > "$summary"
   echo "host: $(hostname)"
   echo "git: $(git rev-parse HEAD 2>/dev/null || echo unknown)"
   echo "device: $DEVICE"
+  echo "backends: $BACKENDS"
+  echo "l_tol: ${L_TOL:-input default}"
   nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader 2>/dev/null || true
 } > "$OUT/provenance.txt"
 
@@ -49,12 +82,14 @@ for n in $SIZES; do
     echo "== $backend n=$n ($((n * n)) dofs), $STEPS steps"
 
     status=OK
-    timeout "$TIME_LIMIT" "$MARLIN" -i "$INPUT" \
+    # ${a[@]+"${a[@]}"}: empty arrays expand to nothing under set -u in bash 3.2 (macOS)
+    ${limit[@]+"${limit[@]}"} "$MARLIN" -i "$INPUT" \
       Domain/nx=$n Domain/ny=$n \
       Executioner/num_steps=$STEPS \
       TensorSolver/linear_solver=$backend \
       "TensorOutputs/active=''" \
       Outputs/file_base="$base" \
+      ${extra[@]+"${extra[@]}"} \
       --compute-device="$DEVICE" > "$base.log" 2>&1 || status=$?
     [ "$status" = 124 ] && status=TIMEOUT
     [ "$status" != OK ] && [ "$status" != TIMEOUT ] && status="FAILED($status)"
