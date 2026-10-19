@@ -157,9 +157,9 @@ countLevels(const Partition & partition, PetscInt stencil_width)
 Hierarchy::~Hierarchy()
 {
   for (auto & P : interpolations)
-    MatDestroy(&P);
+    PetscCallAbort(PETSC_COMM_WORLD, MatDestroy(&P));
   for (auto & da : dms)
-    DMDestroy(&da);
+    PetscCallAbort(PETSC_COMM_WORLD, DMDestroy(&da));
 }
 
 void
