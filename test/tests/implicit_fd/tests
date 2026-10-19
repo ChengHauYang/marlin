@@ -10,6 +10,7 @@
       cli_args = 'TensorSolver/linear_solver=TORCH_PCG dt2=0.02 Outputs/file_base=be_mode_2d_3pt'
       csvdiff = be_mode_2d_3pt.csv
       compute_devices = 'cpu cuda'
+      min_slots = 2 # memory heavy
       detail = 'in 2D with the 3-point stencil,'
     []
     [2d_5pt]
@@ -18,6 +19,7 @@
       cli_args = 'TensorSolver/linear_solver=TORCH_PCG dt2=0.02 stencil=5 Outputs/file_base=be_mode_2d_5pt'
       csvdiff = be_mode_2d_5pt.csv
       compute_devices = 'cpu cuda'
+      min_slots = 2 # memory heavy
       detail = 'in 2D with the 5-point stencil,'
     []
     [3d_3pt]
@@ -26,6 +28,7 @@
       cli_args = 'TensorSolver/linear_solver=TORCH_PCG dt2=0.02 Outputs/file_base=be_mode_3d_3pt'
       csvdiff = be_mode_3d_3pt.csv
       compute_devices = 'cpu cuda'
+      min_slots = 2 # memory heavy
       detail = 'in 3D with the 3-point stencil,'
     []
     [3d_5pt]
@@ -34,6 +37,7 @@
       cli_args = 'TensorSolver/linear_solver=TORCH_PCG dt2=0.02 stencil=5 Outputs/file_base=be_mode_3d_5pt'
       csvdiff = be_mode_3d_5pt.csv
       compute_devices = 'cpu cuda'
+      min_slots = 2 # memory heavy
       detail = 'in 3D with the 5-point stencil, and'
     []
     [2d_3pt_mps]
@@ -100,6 +104,7 @@
       csvdiff = be_mode_2d_3pt.csv
       abs_zero = 1e-8
       compute_devices = 'cuda'
+      min_slots = 2 # memory heavy
       capabilities = 'cuda'
       detail = 'in 2D with the 3-point stencil on CUDA.'
     []
@@ -113,6 +118,7 @@
       cli_args = 'TensorSolver/linear_solver=TORCH_PCG Outputs/file_base=poisson_mms_3pt'
       csvdiff = poisson_mms_3pt.csv
       compute_devices = 'cpu cuda'
+      min_slots = 2 # memory heavy
       detail = 'with the second order 3-point stencil,'
     []
     [5pt]
@@ -121,6 +127,7 @@
       cli_args = 'TensorSolver/linear_solver=TORCH_PCG TensorComputes/Solve/lap/stencil_width=5 Outputs/file_base=poisson_mms_5pt'
       csvdiff = poisson_mms_5pt.csv
       compute_devices = 'cpu cuda'
+      min_slots = 2 # memory heavy
       detail = 'with the fourth order 5-point stencil, and'
     []
     [3pt_mps]
@@ -162,6 +169,7 @@
       cli_args = 'TensorSolver/linear_solver=PETSC Outputs/file_base=poisson_mms_3pt'
       csvdiff = poisson_mms_3pt.csv
       compute_devices = 'cuda'
+      min_slots = 2 # memory heavy
       capabilities = 'cuda'
       detail = 'with the 3-point stencil on CUDA.'
     []
