@@ -52,10 +52,11 @@ void
 fillVec(DM da, Vec v, const std::function<double(const std::array<double, 3> &)> & f)
 {
   PetscInt dim, M[3] = {1, 1, 1}, s[3], m[3];
-  DMDAGetInfo(da, &dim, &M[0], &M[1], &M[2], 0, 0, 0, 0, 0, 0, 0, 0, 0);
-  DMDAGetCorners(da, &s[0], &s[1], &s[2], &m[0], &m[1], &m[2]);
+  PetscCallAbort(PETSC_COMM_WORLD,
+                 DMDAGetInfo(da, &dim, &M[0], &M[1], &M[2], 0, 0, 0, 0, 0, 0, 0, 0, 0));
+  PetscCallAbort(PETSC_COMM_WORLD, DMDAGetCorners(da, &s[0], &s[1], &s[2], &m[0], &m[1], &m[2]));
   PetscScalar * a;
-  VecGetArray(v, &a);
+  PetscCallAbort(PETSC_COMM_WORLD, VecGetArray(v, &a));
   PetscInt q = 0;
   for (PetscInt k = s[2]; k < s[2] + m[2]; ++k)
     for (PetscInt j = s[1]; j < s[1] + m[1]; ++j)
@@ -68,18 +69,18 @@ fillVec(DM da, Vec v, const std::function<double(const std::array<double, 3> &)>
           x[dim - 1 - ax] = (idx[ax] + 0.5) / M[ax];
         a[q++] = f(x);
       }
-  VecRestoreArray(v, &a);
+  PetscCallAbort(PETSC_COMM_WORLD, VecRestoreArray(v, &a));
 }
 
 double
 maxDiff(Vec a, Vec b)
 {
   Vec d;
-  VecDuplicate(a, &d);
-  VecWAXPY(d, -1.0, b, a);
+  PetscCallAbort(PETSC_COMM_WORLD, VecDuplicate(a, &d));
+  PetscCallAbort(PETSC_COMM_WORLD, VecWAXPY(d, -1.0, b, a));
   PetscReal norm;
-  VecNorm(d, NORM_INFINITY, &norm);
-  VecDestroy(&d);
+  PetscCallAbort(PETSC_COMM_WORLD, VecNorm(d, NORM_INFINITY, &norm));
+  PetscCallAbort(PETSC_COMM_WORLD, VecDestroy(&d));
   return norm;
 }
 }
@@ -114,21 +115,21 @@ TEST(PetscFDHierarchyTest, CellCentredInterpolation)
       Mat P = h.interpolations[0];
 
       Vec coarse, fine, expected;
-      DMCreateGlobalVector(h.dms[1], &coarse);
-      DMCreateGlobalVector(h.dms[0], &fine);
-      DMCreateGlobalVector(h.dms[0], &expected);
+      PetscCallAbort(PETSC_COMM_WORLD, DMCreateGlobalVector(h.dms[1], &coarse));
+      PetscCallAbort(PETSC_COMM_WORLD, DMCreateGlobalVector(h.dms[0], &fine));
+      PetscCallAbort(PETSC_COMM_WORLD, DMCreateGlobalVector(h.dms[0], &expected));
 
       // constant
-      VecSet(coarse, 1.0);
-      MatMult(P, coarse, fine);
-      VecSet(expected, 1.0);
+      PetscCallAbort(PETSC_COMM_WORLD, VecSet(coarse, 1.0));
+      PetscCallAbort(PETSC_COMM_WORLD, MatMult(P, coarse, fine));
+      PetscCallAbort(PETSC_COMM_WORLD, VecSet(expected, 1.0));
       EXPECT_LT(maxDiff(fine, expected), 1e-14) << "dim " << dim;
 
       // linear in every axis, compared at fine cells whose stencil does not cross the seam
       const auto linear = [&](const std::array<double, 3> & x)
       { return 1.0 + 2.0 * x[0] - 3.0 * x[1] + 0.5 * x[2]; };
       fillVec(h.dms[1], coarse, linear);
-      MatMult(P, coarse, fine);
+      PetscCallAbort(PETSC_COMM_WORLD, MatMult(P, coarse, fine));
       fillVec(h.dms[0], expected, linear);
       const auto interior = [&](const std::array<double, 3> & x)
       {
@@ -139,16 +140,16 @@ TEST(PetscFDHierarchyTest, CellCentredInterpolation)
         return inside ? 1.0 : 0.0;
       };
       Vec mask;
-      DMCreateGlobalVector(h.dms[0], &mask);
+      PetscCallAbort(PETSC_COMM_WORLD, DMCreateGlobalVector(h.dms[0], &mask));
       fillVec(h.dms[0], mask, interior);
-      VecPointwiseMult(fine, fine, mask);
-      VecPointwiseMult(expected, expected, mask);
+      PetscCallAbort(PETSC_COMM_WORLD, VecPointwiseMult(fine, fine, mask));
+      PetscCallAbort(PETSC_COMM_WORLD, VecPointwiseMult(expected, expected, mask));
       EXPECT_LT(maxDiff(fine, expected), 1e-13) << "dim " << dim;
 
-      VecDestroy(&mask);
-      VecDestroy(&coarse);
-      VecDestroy(&fine);
-      VecDestroy(&expected);
+      PetscCallAbort(PETSC_COMM_WORLD, VecDestroy(&mask));
+      PetscCallAbort(PETSC_COMM_WORLD, VecDestroy(&coarse));
+      PetscCallAbort(PETSC_COMM_WORLD, VecDestroy(&fine));
+      PetscCallAbort(PETSC_COMM_WORLD, VecDestroy(&expected));
     }
     MPI_Comm_free(&comm);
   }
@@ -171,7 +172,7 @@ TEST(PetscFDHierarchyTest, FineDMDAMatchesMarlinBlock)
 
       // global cell index i_0 n^2 + i_1 n + i_2 (Marlin order), via the DMDA coordinates
       Vec v;
-      DMCreateGlobalVector(h.dms[0], &v);
+      PetscCallAbort(PETSC_COMM_WORLD, DMCreateGlobalVector(h.dms[0], &v));
       fillVec(h.dms[0],
               v,
               [&](const std::array<double, 3> & x)
@@ -192,9 +193,9 @@ TEST(PetscFDHierarchyTest, FineDMDAMatchesMarlinBlock)
       }
       const PetscScalar * a;
       PetscInt local;
-      VecGetLocalSize(v, &local);
+      PetscCallAbort(PETSC_COMM_WORLD, VecGetLocalSize(v, &local));
       ASSERT_EQ(local, size[0] * size[1] * size[2]);
-      VecGetArrayRead(v, &a);
+      PetscCallAbort(PETSC_COMM_WORLD, VecGetArrayRead(v, &a));
       PetscInt q = 0;
       for (const auto i0 : make_range(size[0]))
         for (const auto i1 : make_range(size[1]))
@@ -206,8 +207,8 @@ TEST(PetscFDHierarchyTest, FineDMDAMatchesMarlinBlock)
               id = id * n + g[d];
             EXPECT_EQ(a[q++], id) << "dim " << dim;
           }
-      VecRestoreArrayRead(v, &a);
-      VecDestroy(&v);
+      PetscCallAbort(PETSC_COMM_WORLD, VecRestoreArrayRead(v, &a));
+      PetscCallAbort(PETSC_COMM_WORLD, VecDestroy(&v));
     }
     MPI_Comm_free(&comm);
   }
@@ -241,7 +242,7 @@ TEST(PetscFDHierarchyTest, AssembledOperatorIsRediscretisation)
         const auto stencil = FiniteDifferenceLaplacian::buildStencil(dim, wide, dx, -1.0);
 
         Mat B;
-        DMCreateMatrix(h.dms[1], &B);
+        PetscCallAbort(PETSC_COMM_WORLD, DMCreateMatrix(h.dms[1], &B));
         PetscFD::assembleStencilOperator(h.dms[1], stencil, 1.0, B);
 
         // symbol of -Laplacian on axis d for the mode cos(2 pi k x / L), theta = 2 pi k / nc
@@ -262,21 +263,21 @@ TEST(PetscFDHierarchyTest, AssembledOperatorIsRediscretisation)
         };
 
         Vec u, Bu, expected;
-        DMCreateGlobalVector(h.dms[1], &u);
-        DMCreateGlobalVector(h.dms[1], &Bu);
-        DMCreateGlobalVector(h.dms[1], &expected);
+        PetscCallAbort(PETSC_COMM_WORLD, DMCreateGlobalVector(h.dms[1], &u));
+        PetscCallAbort(PETSC_COMM_WORLD, DMCreateGlobalVector(h.dms[1], &Bu));
+        PetscCallAbort(PETSC_COMM_WORLD, DMCreateGlobalVector(h.dms[1], &expected));
         fillVec(h.dms[1], u, [&](const std::array<double, 3> & x) { return modes(x, false); });
         fillVec(
             h.dms[1], expected, [&](const std::array<double, 3> & x) { return modes(x, true); });
-        MatMult(B, u, Bu);
+        PetscCallAbort(PETSC_COMM_WORLD, MatMult(B, u, Bu));
         PetscReal scale;
-        VecNorm(expected, NORM_INFINITY, &scale);
+        PetscCallAbort(PETSC_COMM_WORLD, VecNorm(expected, NORM_INFINITY, &scale));
         EXPECT_LT(maxDiff(Bu, expected), 1e-12 * scale) << "dim " << dim << " wide " << wide;
 
-        MatDestroy(&B);
-        VecDestroy(&u);
-        VecDestroy(&Bu);
-        VecDestroy(&expected);
+        PetscCallAbort(PETSC_COMM_WORLD, MatDestroy(&B));
+        PetscCallAbort(PETSC_COMM_WORLD, VecDestroy(&u));
+        PetscCallAbort(PETSC_COMM_WORLD, VecDestroy(&Bu));
+        PetscCallAbort(PETSC_COMM_WORLD, VecDestroy(&expected));
       }
       MPI_Comm_free(&comm);
     }
