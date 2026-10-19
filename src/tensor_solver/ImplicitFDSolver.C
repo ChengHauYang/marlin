@@ -524,8 +524,9 @@ ImplicitFDSolver::setupPetsc(Field & field)
   // coarse levels keep SOR. On CUDA they use Jacobi too: PETSc's SOR runs on the
   // host, which costs two host/device copies per smoothing step (H200, n = 256:
   // same 7 iterations, no copies left in KSPSolve).
-  for (const auto i : make_range(1u, levels))
-    if (i == levels - 1 || cuda)
+  // PCMG level 0 is the coarse LU when there is more than one level
+  for (const auto i : make_range(levels))
+    if (i == levels - 1 || (cuda && i > 0))
     {
       KSP smoother;
       PC smoother_pc;
