@@ -1,5 +1,5 @@
 [Tests]
-  design = 'ImplicitFDSolver.md TimeDerivativeOperator.md'
+  design = 'ImplicitFDSolver.md TimeDerivativeOperator.md FiniteDifferenceBiharmonic.md'
   issues = '#184'
 
   [backward_euler]
@@ -200,6 +200,62 @@
       compute_devices = 'cpu cuda'
       min_slots = 2 # memory heavy
       detail = 'using the torch preconditioned conjugate gradient solver.'
+    []
+  []
+
+  [biharmonic]
+    requirement = 'The system shall integrate a periodic Fourier mode of u_t = -M kappa Laplacian(Laplacian(u)) with implicit backward Euler finite differences, reproducing the exact discrete amplification factor in every step,'
+    [3pt_torch]
+      type = CSVDiff
+      input = biharmonic_mode.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG Outputs/file_base=biharmonic_mode_3pt'
+      csvdiff = biharmonic_mode_3pt.csv
+      # the gold is the exact amplification; max_error is the solve error
+      abs_zero = 1e-8
+      compute_devices = 'cpu cuda'
+      min_slots = 2 # memory heavy
+      detail = 'with the composed 3-point stencil and the torch preconditioned conjugate gradient solver,'
+    []
+    [5pt_torch]
+      type = CSVDiff
+      input = biharmonic_mode.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG stencil=5 Outputs/file_base=biharmonic_mode_5pt'
+      csvdiff = biharmonic_mode_5pt.csv
+      abs_zero = 1e-8
+      compute_devices = 'cpu cuda'
+      min_slots = 2 # memory heavy
+      detail = 'with the composed 5-point stencil and the torch preconditioned conjugate gradient solver,'
+    []
+    [3pt_petsc]
+      type = CSVDiff
+      input = biharmonic_mode.i
+      cli_args = 'TensorSolver/linear_solver=PETSC Outputs/file_base=biharmonic_mode_3pt'
+      csvdiff = biharmonic_mode_3pt.csv
+      abs_zero = 1e-8
+      prereq = 'biharmonic/3pt_torch'
+      compute_devices = 'cpu'
+      detail = 'with the composed 3-point stencil and the PETSc multigrid solver,'
+    []
+    [5pt_petsc]
+      type = CSVDiff
+      input = biharmonic_mode.i
+      cli_args = 'TensorSolver/linear_solver=PETSC stencil=5 Outputs/file_base=biharmonic_mode_5pt'
+      csvdiff = biharmonic_mode_5pt.csv
+      abs_zero = 1e-8
+      prereq = 'biharmonic/5pt_torch'
+      compute_devices = 'cpu'
+      detail = 'with the composed 5-point stencil and the PETSc multigrid solver, and'
+    []
+    [3pt_petsc_cuda]
+      type = CSVDiff
+      input = biharmonic_mode.i
+      cli_args = 'TensorSolver/linear_solver=PETSC Outputs/file_base=biharmonic_mode_3pt'
+      csvdiff = biharmonic_mode_3pt.csv
+      abs_zero = 1e-8
+      compute_devices = 'cuda'
+      min_slots = 2 # memory heavy
+      capabilities = 'cuda'
+      detail = 'with the composed 3-point stencil and the PETSc multigrid solver on CUDA.'
     []
   []
 
