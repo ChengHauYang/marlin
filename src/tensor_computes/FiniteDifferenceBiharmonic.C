@@ -48,22 +48,26 @@ FiniteDifferenceBiharmonic::realSpaceComputeBuffer()
 void
 FiniteDifferenceBiharmonic::computeBuffer()
 {
-  // convolution kernel from the stencil (offset o at kernel index o + radius)
   const int radius = 2 * _laplacian_radius;
-  const int64_t ksize = 2 * radius + 1;
-  std::vector<int64_t> kernel_shape(_dim, ksize);
-  auto kernel = torch::zeros(kernel_shape, _u_in.options());
-  for (const auto & entry : stencilAt())
+  if (!_kernel.defined())
   {
-    auto element = kernel;
-    for (const auto d : make_range(_dim))
-      element = element[entry.offset[d] + radius];
-    element.fill_(entry.coefficient);
+    // convolution kernel from the stencil (offset o at kernel index o + radius),
+    // built once on the host; the stencil is constant
+    const int64_t ksize = 2 * radius + 1;
+    std::vector<int64_t> kernel_shape{1, 1};
+    kernel_shape.insert(kernel_shape.end(), _dim, ksize);
+    auto kernel = torch::zeros(kernel_shape, torch::TensorOptions().dtype(torch::kFloat64));
+    auto flat = kernel.view({-1});
+    for (const auto & entry : stencilAt())
+    {
+      int64_t index = 0;
+      for (const auto d : make_range(_dim))
+        index = index * ksize + entry.offset[d] + radius;
+      flat[index] = entry.coefficient;
+    }
+    _kernel = kernel.to(_u_in.options());
   }
 
-  std::vector<int64_t> kernel_view{1, 1};
-  kernel_view.insert(kernel_view.end(), kernel_shape.begin(), kernel_shape.end());
-  kernel = kernel.view(kernel_view);
   std::vector<int64_t> input_view{1, 1};
   input_view.insert(input_view.end(), _u_in.sizes().begin(), _u_in.sizes().end());
   const auto input = _u_in.view(input_view);
@@ -71,13 +75,13 @@ FiniteDifferenceBiharmonic::computeBuffer()
   torch::Tensor result;
   if (_dim == 1)
     result = torch::nn::functional::conv1d(
-        input, kernel, torch::nn::functional::Conv1dFuncOptions().padding(radius));
+        input, _kernel, torch::nn::functional::Conv1dFuncOptions().padding(radius));
   else if (_dim == 2)
     result = torch::nn::functional::conv2d(
-        input, kernel, torch::nn::functional::Conv2dFuncOptions().padding(radius));
+        input, _kernel, torch::nn::functional::Conv2dFuncOptions().padding(radius));
   else
     result = torch::nn::functional::conv3d(
-        input, kernel, torch::nn::functional::Conv3dFuncOptions().padding(radius));
+        input, _kernel, torch::nn::functional::Conv3dFuncOptions().padding(radius));
   _u.copy_(result.view(_u.sizes()));
 }
 
