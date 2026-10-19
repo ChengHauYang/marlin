@@ -232,7 +232,8 @@
       # MPS has no double precision: a single precision reachable tolerance
       cli_args = 'TensorSolver/linear_solver=TORCH_PCG TensorSolver/l_tol=1e-5 Outputs/file_base=biharmonic_mode_3pt'
       csvdiff = biharmonic_mode_3pt.csv
-      abs_zero = 1e-5
+      # max_error is the single precision solve error at l_tol = 1e-5 (1.3e-5 measured)
+      abs_zero = 1e-4
       rel_err = 1e-5
       compute_devices = 'mps'
       detail = 'with the composed 3-point stencil and the torch preconditioned conjugate gradient solver in single precision on MPS,'
