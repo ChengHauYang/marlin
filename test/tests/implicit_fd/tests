@@ -335,7 +335,7 @@
     [last_step]
       type = RunApp
       input = be_mode.i
-      # the default Chebyshev smoother takes 2 iterations
+      # the default smoother takes 2 iterations
       cli_args = 'TensorSolver/linear_solver=PETSC Outputs/csv=false -u_mg_levels_ksp_max_it 3 -u_ksp_view'
       expect_out = 'Time Step 10,.*KSP Object: \(u_mg_levels_1_\).*maximum iterations=3'
       compute_devices = 'cpu'

@@ -113,6 +113,9 @@ protected:
   /// (re)assemble the coarse levels from the current stencil if it changed
   void assembleCoarseLevels(Field & field);
 
+  /// set the damped Jacobi weight of every level smoother from the level's stencil
+  void setSmootherWeights(Field & field);
+
   /// put the block's PETSc options (prefix <buffer>_) and the command line into the global database
   void insertPetscOptions(const Field & field);
 

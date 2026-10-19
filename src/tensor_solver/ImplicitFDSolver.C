@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <set>
 #include <sstream>
 
@@ -416,6 +417,24 @@ sameStencil(const std::vector<FDStencilEntry> & a, const std::vector<FDStencilEn
   return true;
 }
 
+/// Gershgorin bound on the spectrum of D^-1 A for the periodic constant-coefficient
+/// operator with this stencil (D the centre coefficient): 1 + sum_{o != 0} |a_o| / a_0
+Real
+jacobiSpectrumBound(const std::vector<FDStencilEntry> & stencil)
+{
+  std::map<std::vector<int>, Real> merged;
+  for (const auto & entry : stencil)
+    merged[entry.offset] += entry.coefficient;
+  Real centre = 0.0, off_diagonal = 0.0;
+  for (const auto & [offset, coefficient] : merged)
+    if (std::all_of(offset.begin(), offset.end(), [](int o) { return o == 0; }))
+      centre = coefficient;
+    else
+      off_diagonal += std::abs(coefficient);
+  mooseAssert(centre > 0.0, "the centre coefficient of an SPD stencil must be positive");
+  return 1.0 + off_diagonal / centre;
+}
+
 #if MARLIN_PETSC_CUDA
 /// makes torch enqueue on PETSc's current CUDA stream while a shell callback runs
 class PetscStreamGuard
@@ -570,18 +589,21 @@ ImplicitFDSolver::setupPetsc(Field & field)
     const auto B = ps.coarse[levels - 2 - i];
     PetscCallAbort(comm, KSPSetOperators(smoother, B, B));
   }
-  // PCMG's default smoother is Chebyshev + SOR. The fine shell has no SOR, so it uses
-  // Jacobi from its diagonal. On CUDA the coarse levels use Jacobi too, since PETSc's
-  // SOR runs on the host. PCMG level 0 is the coarse LU when levels > 1.
-  for (const auto i : make_range(levels))
-    if (i == levels - 1 || (cuda && i > 0))
-    {
-      KSP smoother;
-      PC smoother_pc;
-      PetscCallAbort(comm, PCMGGetSmoother(pc, PetscInt(i), &smoother));
-      PetscCallAbort(comm, KSPGetPC(smoother, &smoother_pc));
-      PetscCallAbort(comm, PCSetType(smoother_pc, PCJACOBI));
-    }
+  // Damped Jacobi smoothing (Richardson + Jacobi) on every level, with the weight set from
+  // the level's stencil in setSmootherWeights. PCMG's default Chebyshev estimates its
+  // eigenvalue bounds with a few Krylov steps, and those estimates went indefinite
+  // (KSP_DIVERGED_INDEFINITE_PC) on the implicit biharmonic as dt grew. Jacobi also runs
+  // on CUDA, where PETSc's SOR runs on the host. PCMG level 0 is the coarse LU when
+  // levels > 1.
+  for (const auto i : make_range(levels > 1 ? 1u : 0u, levels))
+  {
+    KSP smoother;
+    PC smoother_pc;
+    PetscCallAbort(comm, PCMGGetSmoother(pc, PetscInt(i), &smoother));
+    PetscCallAbort(comm, KSPSetType(smoother, KSPRICHARDSON));
+    PetscCallAbort(comm, KSPGetPC(smoother, &smoother_pc));
+    PetscCallAbort(comm, PCSetType(smoother_pc, PCJACOBI));
+  }
   if (field._singular && levels > 1)
   {
     // the coarse LU meets a zero pivot from the constant nullspace; shifting it changes
@@ -645,10 +667,55 @@ ImplicitFDSolver::assembleCoarseLevels(Field & field)
   }
 
   // the shell's action changed too; bump its state and reset the KSP operators so
-  // that PCMG sets up every level again (Chebyshev bounds, coarse factorisation)
+  // that PCMG sets up every level again (Jacobi diagonals, coarse factorisation)
   PetscCallAbort(comm, PetscObjectStateIncrease((PetscObject)ps.fine));
   PetscCallAbort(comm, KSPSetOperators(ps.ksp, ps.fine, ps.fine));
   ps.assembled_stencil = stencil;
+
+  setSmootherWeights(field);
+}
+
+void
+ImplicitFDSolver::setSmootherWeights(Field & field)
+{
+  auto & ps = *field._petsc;
+  const auto comm = ps.comm;
+  const auto levels = ps.coarse.size() + 1;
+  const auto & grid_spacing = _domain.getGridSpacing();
+
+  PC pc;
+  PetscCallAbort(comm, KSPGetPC(ps.ksp, &pc));
+  // nothing to do if the user replaced PCMG (e.g. -<buffer>_pc_type jacobi)
+  PetscBool is_mg;
+  PetscCallAbort(comm, PetscObjectTypeCompare((PetscObject)pc, PCMG, &is_mg));
+  if (!is_mg)
+    return;
+  for (const auto i : make_range(levels > 1 ? std::size_t(1) : std::size_t(0), levels))
+  {
+    KSP smoother;
+    PetscCallAbort(comm, PCMGGetSmoother(pc, PetscInt(i), &smoother));
+    // a user set -<buffer>_mg_levels_ksp_richardson_scale wins
+    const char * prefix;
+    PetscBool user_scale;
+    PetscCallAbort(comm, KSPGetOptionsPrefix(smoother, &prefix));
+    PetscCallAbort(comm,
+                   PetscOptionsHasName(nullptr, prefix, "-ksp_richardson_scale", &user_scale));
+    if (user_scale)
+      continue;
+
+    // PCMG level i is hierarchy level k = levels - 1 - i, with spacing 2^k h. The
+    // 2^(dim k) scaling of the assembled levels cancels in D^-1 A.
+    const auto k = levels - 1 - i;
+    std::vector<Real> spacing(_dim);
+    for (const auto d : make_range(_dim))
+      spacing[d] = grid_spacing(d) * Real(1 << k);
+    // The spectrum of D^-1 A lies in [0, rho] with rho at most the Gershgorin bound.
+    // omega = 4 / (3 rho) damps the upper half [rho/2, rho] by at least 1/3 per sweep and
+    // keeps |1 - omega lambda| < 1 on (0, rho].
+    const auto rho = jacobiSpectrumBound(fieldStencil(field._fd_operators, spacing));
+    // no-op if the user changed the smoother type
+    PetscCallAbort(comm, KSPRichardsonSetScale(smoother, 4.0 / (3.0 * rho)));
+  }
 }
 
 ImplicitFDSolver::SolveResult

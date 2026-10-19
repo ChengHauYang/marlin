@@ -37,8 +37,12 @@ The `PETSC` linear solver (the default except on MPS) is PETSc's conjugate gradi
 preconditioned by geometric multigrid (`KSPCG` + `PCMG`), in double precision on CPU or CUDA. The
 fine level applies the operators matrix-free; the coarse levels are the operators rediscretised on
 grids coarsened by two per axis and assembled, connected by cell-centred multilinear interpolation.
-The smoother is Chebyshev with Jacobi on the fine level and PETSc's default SOR on the coarse levels
-on CPU; on CUDA all levels use Jacobi, since PETSc's SOR runs on the host.
+Every level is smoothed by two sweeps of damped Jacobi (`KSPRICHARDSON` + `PCJACOBI`) with the
+weight $\omega = 4/(3\rho)$, where $\rho = 1 + \sum_{o \ne 0} |a_o| / a_0$ is the Gershgorin bound
+on the Jacobi scaled spectrum from the level's stencil coefficients $a_o$. The weight is recomputed
+when the operators change (e.g. with the time step), unless `-<buffer>_mg_levels_ksp_richardson_scale`
+is set. PETSc's default Chebyshev smoother estimates its eigenvalue bounds and went indefinite on
+the implicit biharmonic at large time steps.
 PETSc options apply with the field name as prefix: `petsc_options_iname = '-pc_type'` with
 `petsc_options_value = 'jacobi'` sets `-u_pc_type jacobi` for field `u`. The block options apply to
 every field, and command line options (e.g. `-u_mg_levels_ksp_max_it 3`) override them.
