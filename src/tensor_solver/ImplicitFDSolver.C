@@ -12,11 +12,29 @@
 #include "DomainAction.h"
 #include "MarlinUtils.h"
 
+#include "PetscSupport.h"
+
 #include "libmesh/int_range.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <limits>
+
+// the PETSc backend on CUDA needs PETSc and torch both built with CUDA
+#if defined(__has_include)
+#if __has_include(<ATen/cuda/CUDAConfig.h>)
+#define MARLIN_TORCH_HAS_CUDA 1
+#endif
+#endif
+#if PetscDefined(HAVE_CUDA) && defined(MARLIN_TORCH_HAS_CUDA)
+#define MARLIN_PETSC_CUDA 1
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
+#include <petscdevice_cuda.h>
+#else
+#define MARLIN_PETSC_CUDA 0
+#endif
 
 registerMooseObject("MarlinApp", ImplicitFDSolver);
 
@@ -46,6 +64,11 @@ ImplicitFDSolver::validParams()
   params.addRangeCheckedParam<unsigned int>(
       "l_max_its", 10000, "l_max_its > 0", "Maximum number of linear iterations");
 
+  // PETSc options of the PETSC backend, applied with the prefix <buffer>_
+  params += Moose::PetscSupport::getPetscValidParams();
+  params.suppressParameter<MooseEnum>("solve_type");
+  params.suppressParameter<MooseEnum>("mffd_type");
+
   return params;
 }
 
@@ -71,7 +94,23 @@ ImplicitFDSolver::ImplicitFDSolver(const InputParameters & parameters)
     _linear_solver = linear_solver == "PETSC" ? LinearSolver::PETSC : LinearSolver::TORCH_PCG;
 
   if (_linear_solver == LinearSolver::PETSC)
-    paramError("linear_solver", "The PETSC backend is not implemented yet.");
+  {
+    if (device.is_mps())
+      paramError("linear_solver",
+                 "The PETSC linear solver does not run on MPS. Use linear_solver = TORCH_PCG.");
+    if (torch::typeMetaToScalarType(MooseTensor::floatTensorOptions().dtype()) != torch::kDouble)
+      paramError("linear_solver",
+                 "The PETSC linear solver requires double precision. Use "
+                 "linear_solver = TORCH_PCG for single precision.");
+    if (device.is_cuda() && !MARLIN_PETSC_CUDA)
+      paramError("linear_solver",
+                 "The PETSC linear solver on CUDA requires PETSc and libtorch built with CUDA. Use "
+                 "linear_solver = TORCH_PCG.");
+  }
+  else
+    for (const auto & name : {"petsc_options", "petsc_options_iname", "petsc_options_value"})
+      if (isParamSetByUser(name))
+        paramError(name, "PETSc options are not used by linear_solver = TORCH_PCG.");
 
   // the operators act on ghosted real space buffers
   if (!_domain.isRealSpaceMode())
@@ -101,7 +140,8 @@ ImplicitFDSolver::ImplicitFDSolver(const InputParameters & parameters)
                 {},
                 {},
                 sources.empty() ? nullptr : &getBufferBase(sources[i]),
-                false};
+                false,
+                nullptr};
 
     if (operators[i].empty())
       paramError("operators", "No operators given for field '", buffers[i], "'.");
@@ -205,6 +245,8 @@ ImplicitFDSolver::substep()
     if (b_norm == 0.0)
       // the zero-mean solution of A x = 0 is x = 0
       x.zero_();
+    else if (_linear_solver == LinearSolver::PETSC)
+      iterations = solvePetsc(field, b, x);
     else
       iterations = solveTorchPCG(field, b, b_norm, x);
 
@@ -275,4 +317,383 @@ ImplicitFDSolver::solveTorchPCG(Field & field,
 
   x = x_new;
   return iterations;
+}
+
+ImplicitFDSolver::PetscSolve::~PetscSolve()
+{
+  PetscCallAbort(PETSC_COMM_WORLD, VecDestroy(&b));
+  PetscCallAbort(PETSC_COMM_WORLD, VecDestroy(&x));
+  PetscCallAbort(PETSC_COMM_WORLD, KSPDestroy(&ksp));
+  PetscCallAbort(PETSC_COMM_WORLD, MatDestroy(&fine));
+  for (auto & B : coarse)
+    PetscCallAbort(PETSC_COMM_WORLD, MatDestroy(&B));
+  PetscCallAbort(PETSC_COMM_WORLD, MatNullSpaceDestroy(&nullspace));
+  hierarchy.reset();
+  if (comm != MPI_COMM_NULL)
+    MPI_Comm_free(&comm);
+}
+
+namespace
+{
+/// the summed stencil of all operators at the given spacing (empty spacing: the domain's)
+std::vector<FDStencilEntry>
+fieldStencil(const std::vector<const LinearFDOperator *> & fd_operators,
+             const std::vector<Real> & grid_spacing = {})
+{
+  std::vector<FDStencilEntry> stencil;
+  for (const auto * fd_op : fd_operators)
+  {
+    const auto entries = grid_spacing.empty() ? fd_op->stencilAt() : fd_op->stencilAt(grid_spacing);
+    stencil.insert(stencil.end(), entries.begin(), entries.end());
+  }
+  return stencil;
+}
+
+bool
+sameStencil(const std::vector<FDStencilEntry> & a, const std::vector<FDStencilEntry> & b)
+{
+  if (a.size() != b.size())
+    return false;
+  for (const auto i : index_range(a))
+    if (a[i].offset != b[i].offset || a[i].coefficient != b[i].coefficient)
+      return false;
+  return true;
+}
+
+#if MARLIN_PETSC_CUDA
+/// makes torch enqueue on PETSc's current CUDA stream while a shell callback runs
+class PetscStreamGuard
+{
+public:
+  PetscStreamGuard()
+  {
+    cudaStream_t petsc_stream;
+    PetscCallAbort(PETSC_COMM_SELF, PetscGetCurrentCUDAStream(&petsc_stream));
+    _guard = std::make_unique<c10::cuda::CUDAStreamGuard>(
+        c10::cuda::getStreamFromExternal(petsc_stream, c10::cuda::current_device()));
+  }
+
+private:
+  std::unique_ptr<c10::cuda::CUDAStreamGuard> _guard;
+};
+#endif
+
+/// options prefix of a field's KSP (PETSc prefixes are lower case and end in '_')
+std::string
+petscPrefix(const std::string & name)
+{
+  std::string prefix = name + "_";
+  std::transform(prefix.begin(),
+                 prefix.end(),
+                 prefix.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  return prefix;
+}
+
+bool
+onCuda()
+{
+  return MooseTensor::floatTensorOptions().device().is_cuda();
+}
+}
+
+void
+ImplicitFDSolver::insertPetscOptions(const Field & field)
+{
+  const auto prefix = petscPrefix(field._name);
+
+  Moose::PetscSupport::PetscOptions po;
+  Moose::PetscSupport::addPetscFlagsToPetscOptions(
+      getParam<MultiMooseEnum>("petsc_options"), prefix, *this, po);
+  Moose::PetscSupport::addPetscPairsToPetscOptions(
+      getParam<MooseEnumItem, std::string>("petsc_options_iname", "petsc_options_value"),
+      _dim,
+      prefix,
+      *this,
+      po);
+
+  // the global database, which the PCMG level KSPs read as well (they only get a prefix)
+  for (const auto & flag : po.flags)
+    Moose::PetscSupport::setSinglePetscOption(flag.rawName());
+  for (const auto & [name, value] : po.pairs)
+    Moose::PetscSupport::setSinglePetscOption(name, value);
+  // command line options win
+  Moose::PetscSupport::addPetscOptionsFromCommandline();
+}
+
+void
+ImplicitFDSolver::setupPetsc(Field & field)
+{
+  field._petsc = std::make_unique<PetscSolve>();
+  auto & ps = *field._petsc;
+  ps.solver = this;
+  ps.field = &field;
+
+  const auto partition = PetscFD::gatherPartition(_domain);
+  ps.comm = PetscFD::dmdaComm(partition);
+  const auto comm = ps.comm;
+
+  const auto stencil = fieldStencil(field._fd_operators);
+  const auto width = PetscFD::stencilWidth(stencil);
+  const auto levels = PetscFD::countLevels(partition, width);
+  ps.hierarchy = std::make_unique<PetscFD::Hierarchy>();
+  PetscFD::buildHierarchy(
+      partition, comm, levels, width, PetscFD::needsBoxStencil(stencil), *ps.hierarchy);
+  auto & hierarchy = *ps.hierarchy;
+
+  const bool cuda = onCuda();
+#if MARLIN_PETSC_CUDA
+  if (cuda)
+  {
+    for (auto & da : hierarchy.dms)
+    {
+      PetscCallAbort(comm, DMSetVecType(da, VECCUDA));
+      PetscCallAbort(comm, DMSetMatType(da, MATAIJCUSPARSE));
+    }
+    for (auto & P : hierarchy.interpolations)
+      PetscCallAbort(comm, MatConvert(P, MATAIJCUSPARSE, MAT_INPLACE_MATRIX, &P));
+  }
+#endif
+
+  // fine level: the operators' own kernels behind a shell
+  const PetscInt local = field._u_base.ownedView().numel();
+  const PetscInt global = _domain.getNumberOfCells();
+  PetscCallAbort(comm, MatCreateShell(comm, local, local, global, global, &ps, &ps.fine));
+  PetscCallAbort(comm, MatShellSetOperation(ps.fine, MATOP_MULT, (void (*)(void))shellMult));
+  PetscCallAbort(comm,
+                 MatShellSetOperation(ps.fine, MATOP_GET_DIAGONAL, (void (*)(void))shellDiagonal));
+#if MARLIN_PETSC_CUDA
+  if (cuda)
+    PetscCallAbort(comm, MatShellSetVecType(ps.fine, VECCUDA));
+#endif
+
+  if (field._singular)
+    PetscCallAbort(comm, MatNullSpaceCreate(comm, PETSC_TRUE, 0, nullptr, &ps.nullspace));
+
+  // coarse levels: rediscretised and assembled
+  ps.coarse.resize(levels - 1);
+  for (auto & B : ps.coarse)
+    B = nullptr;
+  for (const auto l : index_range(ps.coarse))
+    PetscCallAbort(comm, DMCreateMatrix(hierarchy.dms[l + 1], &ps.coarse[l]));
+
+  std::vector<Mat> all_levels{ps.fine};
+  all_levels.insert(all_levels.end(), ps.coarse.begin(), ps.coarse.end());
+  for (auto & A : all_levels)
+    if (field._singular)
+    {
+      PetscCallAbort(comm, MatSetOption(A, MAT_SYMMETRIC, PETSC_TRUE));
+      PetscCallAbort(comm, MatSetOption(A, MAT_SYMMETRY_ETERNAL, PETSC_TRUE));
+      PetscCallAbort(comm, MatSetNullSpace(A, ps.nullspace));
+    }
+  // MAT_SPD is set after every assembly (assembleCoarseLevels), here for the shell
+  if (!field._singular)
+  {
+    PetscCallAbort(comm, MatSetOption(ps.fine, MAT_SPD, PETSC_TRUE));
+    PetscCallAbort(comm, MatSetOption(ps.fine, MAT_SPD_ETERNAL, PETSC_TRUE));
+  }
+
+  // KSPCG + PCMG defaults, set before KSPSetFromOptions so that user options win
+  PetscCallAbort(comm, KSPCreate(comm, &ps.ksp));
+  PetscCallAbort(comm, KSPSetOptionsPrefix(ps.ksp, petscPrefix(field._name).c_str()));
+  PetscCallAbort(comm, KSPSetOperators(ps.ksp, ps.fine, ps.fine));
+  PetscCallAbort(comm, KSPSetType(ps.ksp, KSPCG));
+  PetscCallAbort(comm, KSPSetNormType(ps.ksp, KSP_NORM_UNPRECONDITIONED));
+  PetscCallAbort(comm, KSPSetTolerances(ps.ksp, _l_tol, PETSC_CURRENT, PETSC_CURRENT, _l_max_its));
+  PetscCallAbort(comm, KSPSetInitialGuessNonzero(ps.ksp, PETSC_TRUE));
+
+  PC pc;
+  PetscCallAbort(comm, KSPGetPC(ps.ksp, &pc));
+  PetscCallAbort(comm, PCSetType(pc, PCMG));
+  PetscCallAbort(comm, PCMGSetLevels(pc, PetscInt(levels), nullptr));
+  // PCMG numbers the levels coarsest first: PCMG level i is hierarchy level levels - 1 - i
+  for (const auto i : make_range(1u, levels))
+  {
+    const auto h = levels - 1 - i;
+    PetscCallAbort(comm, PCMGSetInterpolation(pc, PetscInt(i), hierarchy.interpolations[h]));
+  }
+  for (const auto i : make_range(levels - 1))
+  {
+    KSP smoother;
+    PetscCallAbort(comm, PCMGGetSmoother(pc, PetscInt(i), &smoother));
+    const auto B = ps.coarse[levels - 2 - i];
+    PetscCallAbort(comm, KSPSetOperators(smoother, B, B));
+  }
+  {
+    // PCMG's default smoother is Chebyshev + SOR, but the fine shell has no SOR; use
+    // Jacobi from its diagonal there (as in the PR2b spikes). Coarse levels keep SOR.
+    KSP fine_smoother;
+    PC fine_pc;
+    PetscCallAbort(comm, PCMGGetSmoother(pc, PetscInt(levels - 1), &fine_smoother));
+    PetscCallAbort(comm, KSPGetPC(fine_smoother, &fine_pc));
+    PetscCallAbort(comm, PCSetType(fine_pc, PCJACOBI));
+  }
+  if (field._singular && levels > 1)
+  {
+    // the coarse LU meets a zero pivot from the constant nullspace; shifting it changes
+    // only the preconditioner
+    KSP coarse_ksp;
+    PC coarse_pc;
+    PetscCallAbort(comm, PCMGGetCoarseSolve(pc, &coarse_ksp));
+    PetscCallAbort(comm, KSPGetPC(coarse_ksp, &coarse_pc));
+    PetscCallAbort(comm, PCFactorSetShiftType(coarse_pc, MAT_SHIFT_NONZERO));
+  }
+
+  assembleCoarseLevels(field);
+
+  insertPetscOptions(field);
+  PetscCallAbort(comm, KSPSetFromOptions(ps.ksp));
+
+  // b and x get the solver's tensors placed before every solve
+  if (cuda)
+  {
+#if MARLIN_PETSC_CUDA
+    PetscCallAbort(comm, VecCreateMPICUDAWithArray(comm, 1, local, global, nullptr, &ps.b));
+    PetscCallAbort(comm, VecCreateMPICUDAWithArray(comm, 1, local, global, nullptr, &ps.x));
+#endif
+  }
+  else
+  {
+    PetscCallAbort(comm, VecCreateMPIWithArray(comm, 1, local, global, nullptr, &ps.b));
+    PetscCallAbort(comm, VecCreateMPIWithArray(comm, 1, local, global, nullptr, &ps.x));
+  }
+}
+
+void
+ImplicitFDSolver::assembleCoarseLevels(Field & field)
+{
+  auto & ps = *field._petsc;
+  const auto stencil = fieldStencil(field._fd_operators);
+  if (ps.ksp && sameStencil(stencil, ps.assembled_stencil))
+    return;
+
+  const auto comm = ps.comm;
+  const auto & grid_spacing = _domain.getGridSpacing();
+  for (const auto l : index_range(ps.coarse))
+  {
+    // level k = l + 1 has spacing 2^k h. PCMG restricts with P^T, whose column sums
+    // are 2^dim per level, so the rediscretised operator is scaled by 2^(dim k) to
+    // match P^T A P on smooth fields. This scales only the preconditioner.
+    const auto k = l + 1;
+    std::vector<Real> spacing(_dim);
+    for (const auto d : make_range(_dim))
+      spacing[d] = grid_spacing(d) * Real(1 << k);
+    const PetscReal scale = std::pow(2.0, Real(_dim * k));
+    auto & B = ps.coarse[l];
+    PetscFD::assembleStencilOperator(
+        ps.hierarchy->dms[k], fieldStencil(field._fd_operators, spacing), scale, B);
+    // assembly clears MAT_SPD
+    if (!field._singular)
+    {
+      PetscCallAbort(comm, MatSetOption(B, MAT_SPD, PETSC_TRUE));
+      PetscCallAbort(comm, MatSetOption(B, MAT_SPD_ETERNAL, PETSC_TRUE));
+    }
+  }
+
+  if (ps.ksp)
+  {
+    // the shell's action changed too; bump its state and reset the KSP operators so
+    // that PCMG sets up every level again (Chebyshev bounds, coarse factorisation)
+    PetscCallAbort(comm, PetscObjectStateIncrease((PetscObject)ps.fine));
+    PetscCallAbort(comm, KSPSetOperators(ps.ksp, ps.fine, ps.fine));
+  }
+  ps.assembled_stencil = stencil;
+}
+
+unsigned int
+ImplicitFDSolver::solvePetsc(Field & field, torch::Tensor & b, torch::Tensor & x)
+{
+  if (!field._petsc)
+    setupPetsc(field);
+  else
+    assembleCoarseLevels(field);
+  auto & ps = *field._petsc;
+  const auto comm = ps.comm;
+
+  mooseAssert(b.is_contiguous() && x.is_contiguous(), "b and x must be contiguous");
+  if (onCuda())
+  {
+#if MARLIN_PETSC_CUDA
+    PetscCallAbort(comm, VecCUDAPlaceArray(ps.b, b.data_ptr<PetscScalar>()));
+    PetscCallAbort(comm, VecCUDAPlaceArray(ps.x, x.data_ptr<PetscScalar>()));
+#endif
+  }
+  else
+  {
+    PetscCallAbort(comm, VecPlaceArray(ps.b, b.data_ptr<PetscScalar>()));
+    PetscCallAbort(comm, VecPlaceArray(ps.x, x.data_ptr<PetscScalar>()));
+  }
+
+  PetscCallAbort(comm, KSPSolve(ps.ksp, ps.b, ps.x));
+
+  if (onCuda())
+  {
+#if MARLIN_PETSC_CUDA
+    PetscCallAbort(comm, VecCUDAResetArray(ps.b));
+    PetscCallAbort(comm, VecCUDAResetArray(ps.x));
+#endif
+  }
+  else
+  {
+    PetscCallAbort(comm, VecResetArray(ps.b));
+    PetscCallAbort(comm, VecResetArray(ps.x));
+  }
+
+  KSPConvergedReason reason;
+  PetscInt iterations;
+  PetscCallAbort(comm, KSPGetConvergedReason(ps.ksp, &reason));
+  PetscCallAbort(comm, KSPGetIterationNumber(ps.ksp, &iterations));
+  if (reason < 0)
+    mooseError("The PETSC solve of field '",
+               field._name,
+               "' failed after ",
+               iterations,
+               " iterations: ",
+               KSPConvergedReasons[reason],
+               ".");
+  return iterations;
+}
+
+PetscErrorCode
+ImplicitFDSolver::shellMult(Mat A, Vec x, Vec y)
+{
+  PetscSolve * ps;
+  const PetscScalar * x_array;
+  PetscScalar * y_array;
+  PetscMemType x_memtype, y_memtype;
+  PetscFunctionBeginUser;
+  PetscCall(MatShellGetContext(A, &ps));
+  PetscCall(VecGetArrayReadAndMemType(x, &x_array, &x_memtype));
+  PetscCall(VecGetArrayWriteAndMemType(y, &y_array, &y_memtype));
+  PetscCheck(PetscMemTypeDevice(x_memtype) == PetscMemTypeDevice(y_memtype),
+             PETSC_COMM_SELF,
+             PETSC_ERR_ARG_INCOMP,
+             "x and y must live on the same device");
+
+  auto options = MooseTensor::floatTensorOptions().device(torch::kCPU);
+#if MARLIN_PETSC_CUDA
+  std::unique_ptr<PetscStreamGuard> guard;
+  if (PetscMemTypeDevice(x_memtype))
+  {
+    options = options.device(torch::kCUDA, c10::cuda::current_device());
+    guard = std::make_unique<PetscStreamGuard>();
+  }
+#endif
+  const auto shape = ps->field->_u_base.ownedView().sizes().vec();
+  const auto in = torch::from_blob(const_cast<PetscScalar *>(x_array), shape, options);
+  torch::from_blob(y_array, shape, options).copy_(ps->solver->applyOperator(*ps->field, in));
+
+  PetscCall(VecRestoreArrayReadAndMemType(x, &x_array));
+  PetscCall(VecRestoreArrayWriteAndMemType(y, &y_array));
+  PetscFunctionReturn(PETSC_SUCCESS);
+}
+
+PetscErrorCode
+ImplicitFDSolver::shellDiagonal(Mat A, Vec d)
+{
+  PetscSolve * ps;
+  PetscFunctionBeginUser;
+  PetscCall(MatShellGetContext(A, &ps));
+  PetscCall(VecSet(d, ps->solver->diagonal(*ps->field)));
+  PetscFunctionReturn(PETSC_SUCCESS);
 }

@@ -10,6 +10,11 @@
 #include "TensorSolver.h"
 #include "IterativeTensorSolverInterface.h"
 #include "LinearFDOperator.h"
+#include "PetscFDHierarchy.h"
+
+#include <petscksp.h>
+
+#include <memory>
 
 class TensorBufferBase;
 
@@ -28,6 +33,35 @@ public:
   ImplicitFDSolver(const InputParameters & parameters);
 
 protected:
+  struct Field;
+
+  /// PETSc objects of one field's KSPCG + PCMG solve
+  struct PetscSolve
+  {
+    PetscSolve() = default;
+    PetscSolve(const PetscSolve &) = delete;
+    PetscSolve & operator=(const PetscSolve &) = delete;
+    ~PetscSolve();
+
+    /// communicator with the ranks in DMDA order
+    MPI_Comm comm = MPI_COMM_NULL;
+    /// DMDA levels and interpolations (fine first)
+    std::unique_ptr<PetscFD::Hierarchy> hierarchy;
+    /// fine level shell operator and assembled coarse level operators (coarse[l - 1] is level l)
+    Mat fine = nullptr;
+    std::vector<Mat> coarse;
+    /// constants, the nullspace of a singular field's operator on every level
+    MatNullSpace nullspace = nullptr;
+    KSP ksp = nullptr;
+    /// right-hand side and solution, wrapping the solver's tensors
+    Vec b = nullptr, x = nullptr;
+    /// fine stencil the coarse levels were last assembled from
+    std::vector<FDStencilEntry> assembled_stencil;
+    /// MatMult context of the shell
+    ImplicitFDSolver * solver = nullptr;
+    Field * field = nullptr;
+  };
+
   struct Field
   {
     /// name and buffer of the solved field (doubles as Krylov scratch during the solve)
@@ -42,6 +76,8 @@ protected:
     TensorBufferBase * _source;
     /// sum_i A_i has the constants as its nullspace
     bool _singular;
+    /// PETSc backend state (set up on the first solve)
+    std::unique_ptr<PetscSolve> _petsc;
   };
 
   virtual void substep() override;
@@ -55,6 +91,22 @@ protected:
   /// solve sum_i A_i x = b (with ||b||_2 = b_norm) by torch preconditioned CG, warm started from x
   unsigned int
   solveTorchPCG(Field & field, const torch::Tensor & b, Real b_norm, torch::Tensor & x);
+
+  /// solve sum_i A_i x = b by PETSc KSPCG + PCMG, warm started from x (both contiguous)
+  unsigned int solvePetsc(Field & field, torch::Tensor & b, torch::Tensor & x);
+
+  /// create the hierarchy, the level operators and the KSP of a field
+  void setupPetsc(Field & field);
+
+  /// (re)assemble the coarse levels from the current stencil if it changed
+  void assembleCoarseLevels(Field & field);
+
+  /// put the block's PETSc options (prefix <buffer>_) and the command line into the global database
+  void insertPetscOptions(const Field & field);
+
+  /// MATOP_MULT and MATOP_GET_DIAGONAL of the fine level shell
+  static PetscErrorCode shellMult(Mat A, Vec x, Vec y);
+  static PetscErrorCode shellDiagonal(Mat A, Vec d);
 
   enum class LinearSolver
   {
