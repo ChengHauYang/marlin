@@ -146,13 +146,11 @@ substeps = 1000
     type = TensorIntegralChangePostprocessor
     buffer = c
   []
-  # cumulative wall time of the tensor solves (s), excluding outputs
-  [solve_time]
+  # cumulative wall time of the run (s)
+  [wall_time]
     type = PerfGraphData
-    section_name = TensorProblem::tensorSolve
+    section_name = Root
     data_type = TOTAL
-    # the section is registered by the first solve, after the initial postprocessor pass
-    must_exist = false
   []
 []
 
