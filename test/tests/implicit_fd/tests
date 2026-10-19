@@ -1,0 +1,115 @@
+[Tests]
+  design = 'ImplicitFDSolver.md TimeDerivativeOperator.md'
+  issues = '#000'
+
+  [backward_euler]
+    requirement = 'The system shall integrate a periodic Fourier mode with implicit backward Euler finite differences, reproducing the exact discrete amplification factor in every step, including after a time step change, using the torch preconditioned conjugate gradient solver'
+    [2d_3pt]
+      type = CSVDiff
+      input = be_mode.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG dt2=0.02 Outputs/file_base=be_mode_2d_3pt'
+      csvdiff = be_mode_2d_3pt.csv
+      compute_devices = 'cpu cuda'
+      detail = 'in 2D with the 3-point stencil,'
+    []
+    [2d_5pt]
+      type = CSVDiff
+      input = be_mode.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG dt2=0.02 stencil=5 Outputs/file_base=be_mode_2d_5pt'
+      csvdiff = be_mode_2d_5pt.csv
+      compute_devices = 'cpu cuda'
+      detail = 'in 2D with the 5-point stencil,'
+    []
+    [3d_3pt]
+      type = CSVDiff
+      input = be_mode3d.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG dt2=0.02 Outputs/file_base=be_mode_3d_3pt'
+      csvdiff = be_mode_3d_3pt.csv
+      compute_devices = 'cpu cuda'
+      detail = 'in 3D with the 3-point stencil,'
+    []
+    [3d_5pt]
+      type = CSVDiff
+      input = be_mode3d.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG dt2=0.02 stencil=5 Outputs/file_base=be_mode_3d_5pt'
+      csvdiff = be_mode_3d_5pt.csv
+      compute_devices = 'cpu cuda'
+      detail = 'in 3D with the 5-point stencil, and'
+    []
+    [2d_3pt_mps]
+      type = CSVDiff
+      input = be_mode.i
+      # MPS has no double precision: a single precision reachable tolerance
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG TensorSolver/l_tol=1e-5 dt2=0.02 Outputs/file_base=be_mode_2d_3pt'
+      csvdiff = be_mode_2d_3pt.csv
+      abs_zero = 1e-5
+      rel_err = 1e-5
+      compute_devices = 'mps'
+      detail = 'in 2D with the 3-point stencil in single precision on MPS.'
+    []
+  []
+
+  [poisson]
+    requirement = 'The system shall solve the singular steady periodic Poisson problem with implicit finite differences and return the zero-mean solution, using the torch preconditioned conjugate gradient solver'
+    [3pt]
+      type = CSVDiff
+      input = poisson_mms.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG Outputs/file_base=poisson_mms_3pt'
+      csvdiff = poisson_mms_3pt.csv
+      compute_devices = 'cpu cuda'
+      detail = 'with the second order 3-point stencil,'
+    []
+    [5pt]
+      type = CSVDiff
+      input = poisson_mms.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG TensorComputes/Solve/lap/stencil_width=5 Outputs/file_base=poisson_mms_5pt'
+      csvdiff = poisson_mms_5pt.csv
+      compute_devices = 'cpu cuda'
+      detail = 'with the fourth order 5-point stencil, and'
+    []
+    [3pt_mps]
+      type = CSVDiff
+      input = poisson_mms.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG TensorSolver/l_tol=1e-5 Outputs/file_base=poisson_mms_3pt'
+      csvdiff = poisson_mms_3pt.csv
+      # single precision: the zero mean holds to round-off of the field magnitude
+      abs_zero = 1e-5
+      rel_err = 1e-4
+      compute_devices = 'mps'
+      detail = 'with the 3-point stencil in single precision on MPS.'
+    []
+  []
+
+  [errors]
+    requirement = 'The system shall report an error if an implicit finite-difference solve is set up '
+    [not_spd]
+      type = RunException
+      input = poisson_mms.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG TensorComputes/Solve/lap/factor=0.5'
+      expect_err = 'is not symmetric positive \(semi\)definite'
+      detail = 'with an operator that is not symmetric positive (semi)definite,'
+    []
+    [nonzero_mean_source]
+      type = RunException
+      input = poisson_mms.i
+      cli_args = "TensorSolver/linear_solver=TORCH_PCG TensorComputes/Initialize/f_ic/expression='1 "
+                 "+ x'"
+      expect_err = 'the right-hand side must have zero mean'
+      detail = 'for a singular operator with a right-hand side that has a nonzero mean,'
+    []
+    [wrong_field]
+      type = RunException
+      input = be_mode.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG TensorComputes/Solve/lap/input=gold'
+      expect_err = "acts on 'gold' rather than on the solved field 'u'"
+      detail = 'with an operator acting on a field other than the solved field, and'
+    []
+    [not_fd_operator]
+      type = RunException
+      input = be_mode.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG TensorComputes/Solve/scale/type=ParsedCompute TensorComputes/Solve/scale/buffer=diff TensorComputes/Solve/scale/inputs=u TensorComputes/Solve/scale/expression=2*u TensorSolver/operators="dudt scale"'
+      expect_err = "Compute 'scale' is not a LinearFDOperator"
+      detail = 'with an operator that is not a finite-difference operator.'
+    []
+  []
+[]
