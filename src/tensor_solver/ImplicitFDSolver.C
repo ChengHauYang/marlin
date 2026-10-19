@@ -78,7 +78,7 @@ ImplicitFDSolver::ImplicitFDSolver(const InputParameters & parameters)
     _l_tol(getParam<Real>("l_tol")),
     _l_max_its(getParam<unsigned int>("l_max_its"))
 {
-  // backend selection (an explicit choice, never a fallback)
+  // backend selection
   const auto device = MooseTensor::floatTensorOptions().device();
   const auto & linear_solver = getParam<MooseEnum>("linear_solver");
   if (linear_solver == "AUTO")
@@ -202,13 +202,12 @@ ImplicitFDSolver::substep()
   _iterations = 0;
   for (auto & field : _fields)
   {
-    // u is used as Krylov scratch below and is written in place. Its storage may
-    // be shared with its old states (advanceState() stores a shallow copy), so
-    // give it its own storage first.
+    // u is Krylov scratch below; give it its own storage (advanceState() keeps a
+    // shallow copy in its old states)
     field._u = field._u.clone();
 
     // b = sum_i r_i + f, evaluated while u still holds u_old
-    torch::Tensor b = torch::zeros_like(field._u_base.ownedView()).contiguous();
+    torch::Tensor b = torch::zeros_like(field._u_base.ownedView(), torch::MemoryFormat::Contiguous);
     for (const auto * fd_op : field._fd_operators)
       if (const auto r = fd_op->rhsContribution(); r.defined())
         b += r;
@@ -217,11 +216,8 @@ ImplicitFDSolver::substep()
 
     if (field._singular)
     {
-      // b must be in the range of the operator (zero mean), and only a round-off
-      // mean is removed. Pairwise summation of N terms has the error bound
-      // ~log2(N) eps sum|b| (Higham, Accuracy and Stability of Numerical
-      // Algorithms, ch. 4); the factor 16 leaves headroom for the rounding in
-      // evaluating b itself and for the cross-rank reduction.
+      // remove only a round-off mean: pairwise summation errs by ~log2(N) eps sum|b|
+      // (Higham, ch. 4); 16 covers rounding in b and the cross-rank reduction
       const auto n_cells = static_cast<Real>(_domain.getNumberOfCells());
       const Real eps = b.scalar_type() == torch::kFloat ? std::numeric_limits<float>::epsilon()
                                                         : std::numeric_limits<double>::epsilon();
@@ -238,7 +234,7 @@ ImplicitFDSolver::substep()
     }
 
     // warm start from u_old
-    torch::Tensor x = field._u_base.ownedView().contiguous().clone();
+    torch::Tensor x = field._u_base.ownedView().clone(torch::MemoryFormat::Contiguous);
 
     unsigned int iterations = 0;
     const Real b_norm = std::sqrt(_domain.allreduceSum((b * b).sum()).cpu().item<double>());
@@ -253,7 +249,6 @@ ImplicitFDSolver::substep()
     if (field._singular)
       x -= _domain.allreduceSum(x.sum()) / static_cast<Real>(_domain.getNumberOfCells());
 
-    // write the solution into u and update its ghost layers
     field._u_base.ownedView().copy_(x);
     _tensor_problem.exchangeGhostLayers(field._name, _tensor_problem.getMaxGhostLayer());
 
@@ -270,7 +265,6 @@ ImplicitFDSolver::applyOperator(Field & field, const torch::Tensor & x)
   torch::Tensor y;
   for (const auto i : index_range(field._operators))
   {
-    // ghost exchange of u followed by the operator's own kernel
     _tensor_problem.runComputeWithGhosts(*field._operators[i]);
     const auto output = field._operator_outputs[i]->ownedView();
     y = y.defined() ? y + output : output.clone();
@@ -335,7 +329,7 @@ ImplicitFDSolver::PetscSolve::~PetscSolve()
 
 namespace
 {
-/// the summed stencil of all operators at the given spacing (empty spacing: the domain's)
+/// the stencil entries of all operators at the given spacing (empty: the domain's)
 std::vector<FDStencilEntry>
 fieldStencil(const std::vector<const LinearFDOperator *> & fd_operators,
              const std::vector<Real> & grid_spacing = {})
@@ -412,7 +406,7 @@ ImplicitFDSolver::insertPetscOptions(const Field & field)
       *this,
       po);
 
-  // the global database, which the PCMG level KSPs read as well (they only get a prefix)
+  // global database, so the PCMG level KSPs (prefix <buffer>_mg_levels_*) see them too
   for (const auto & flag : po.flags)
     Moose::PetscSupport::setSinglePetscOption(flag.rawName());
   for (const auto & [name, value] : po.pairs)
@@ -472,23 +466,23 @@ ImplicitFDSolver::setupPetsc(Field & field)
 
   // coarse levels: rediscretised and assembled
   ps.coarse.resize(levels - 1);
-  for (auto & B : ps.coarse)
-    B = nullptr;
   for (const auto l : index_range(ps.coarse))
     PetscCallAbort(comm, DMCreateMatrix(hierarchy.dms[l + 1], &ps.coarse[l]));
 
-  std::vector<Mat> all_levels{ps.fine};
-  all_levels.insert(all_levels.end(), ps.coarse.begin(), ps.coarse.end());
-  for (auto & A : all_levels)
-    if (field._singular)
+  if (field._singular)
+  {
+    std::vector<Mat> all_levels{ps.fine};
+    all_levels.insert(all_levels.end(), ps.coarse.begin(), ps.coarse.end());
+    for (auto & A : all_levels)
     {
       PetscCallAbort(comm, MatSetOption(A, MAT_SYMMETRIC, PETSC_TRUE));
       PetscCallAbort(comm, MatSetOption(A, MAT_SYMMETRY_ETERNAL, PETSC_TRUE));
       PetscCallAbort(comm, MatSetNullSpace(A, ps.nullspace));
     }
-  // MAT_SPD is set after every assembly (assembleCoarseLevels), here for the shell
-  if (!field._singular)
+  }
+  else
   {
+    // MAT_SPD of the coarse levels is set after every assembly (assembleCoarseLevels)
     PetscCallAbort(comm, MatSetOption(ps.fine, MAT_SPD, PETSC_TRUE));
     PetscCallAbort(comm, MatSetOption(ps.fine, MAT_SPD_ETERNAL, PETSC_TRUE));
   }
@@ -519,12 +513,9 @@ ImplicitFDSolver::setupPetsc(Field & field)
     const auto B = ps.coarse[levels - 2 - i];
     PetscCallAbort(comm, KSPSetOperators(smoother, B, B));
   }
-  // PCMG's default smoother is Chebyshev + SOR, but the fine shell has no SOR; use
-  // Jacobi from its diagonal there (as in the PR2b spikes). On CPU the assembled
-  // coarse levels keep SOR. On CUDA they use Jacobi too: PETSc's SOR runs on the
-  // host, which costs two host/device copies per smoothing step (H200, n = 256:
-  // same 7 iterations, no copies left in KSPSolve).
-  // PCMG level 0 is the coarse LU when there is more than one level
+  // PCMG's default smoother is Chebyshev + SOR. The fine shell has no SOR, so it uses
+  // Jacobi from its diagonal. On CUDA the coarse levels use Jacobi too, since PETSc's
+  // SOR runs on the host. PCMG level 0 is the coarse LU when levels > 1.
   for (const auto i : make_range(levels))
     if (i == levels - 1 || (cuda && i > 0))
     {
@@ -570,7 +561,7 @@ ImplicitFDSolver::assembleCoarseLevels(Field & field)
 {
   auto & ps = *field._petsc;
   const auto stencil = fieldStencil(field._fd_operators);
-  if (ps.ksp && sameStencil(stencil, ps.assembled_stencil))
+  if (sameStencil(stencil, ps.assembled_stencil))
     return;
 
   const auto comm = ps.comm;
@@ -596,13 +587,10 @@ ImplicitFDSolver::assembleCoarseLevels(Field & field)
     }
   }
 
-  if (ps.ksp)
-  {
-    // the shell's action changed too; bump its state and reset the KSP operators so
-    // that PCMG sets up every level again (Chebyshev bounds, coarse factorisation)
-    PetscCallAbort(comm, PetscObjectStateIncrease((PetscObject)ps.fine));
-    PetscCallAbort(comm, KSPSetOperators(ps.ksp, ps.fine, ps.fine));
-  }
+  // the shell's action changed too; bump its state and reset the KSP operators so
+  // that PCMG sets up every level again (Chebyshev bounds, coarse factorisation)
+  PetscCallAbort(comm, PetscObjectStateIncrease((PetscObject)ps.fine));
+  PetscCallAbort(comm, KSPSetOperators(ps.ksp, ps.fine, ps.fine));
   ps.assembled_stencil = stencil;
 }
 

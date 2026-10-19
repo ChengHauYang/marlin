@@ -32,10 +32,7 @@ public:
   virtual Definiteness definiteness() const override { return Definiteness::POSITIVE_DEFINITE; }
   virtual const std::string & inputBufferName() const override { return _input_name; }
 
-  /**
-   * u^n/dt on the owned cells. Must be called before the solve starts using the
-   * input buffer as Krylov scratch, while it still holds u^n.
-   */
+  /// u^n/dt on the owned cells; call before the solve overwrites the input buffer
   virtual torch::Tensor rhsContribution() const override;
 
 protected:

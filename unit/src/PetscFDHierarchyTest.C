@@ -88,20 +88,13 @@ maxDiff(Vec a, Vec b)
 // full stencil width.
 TEST(PetscFDHierarchyTest, LevelCount)
 {
-  int size;
-  MPI_Comm_size(MPI_COMM_WORLD, &size);
   // 64 -> 32 -> 16 -> 8
   EXPECT_EQ(PetscFD::countLevels(uniformPartition(2, 64), 1), 4u);
   // 96 -> 48 -> 24 -> 12 (6 < 8)
   EXPECT_EQ(PetscFD::countLevels(uniformPartition(2, 96), 1), 4u);
   // odd extents cannot be coarsened
   EXPECT_EQ(PetscFD::countLevels(uniformPartition(3, 18), 1), 2u);
-  if (size == 1)
-    EXPECT_EQ(PetscFD::countLevels(uniformPartition(1, 64), 2), 4u);
-  else if (size == 4)
-    // 4 slabs of 16 on axis 0: a 5-point stencil (width 2) needs 2 owned cells,
-    // which 16 / 8 = 2 still has (64 -> 8 is 4 levels) but 16 / 16 = 1 would not
-    EXPECT_EQ(PetscFD::countLevels(uniformPartition(1, 64), 2), 4u);
+  EXPECT_EQ(PetscFD::countLevels(uniformPartition(1, 64), 2), 4u);
 }
 
 // The cell-centred interpolation: every row sums to 1, constants are reproduced, and it

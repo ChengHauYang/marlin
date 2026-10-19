@@ -19,7 +19,7 @@ namespace PetscFD
 
 namespace
 {
-/// the coarsest grid extent worth coarsening to (cells per axis)
+/// minimum coarse extent (cells per axis)
 constexpr int64_t coarsest_extent = 8;
 
 /// Marlin axis of DMDA axis a
@@ -375,8 +375,7 @@ cellCentredInterpolation(DM coarse, DM fine)
       for (PetscInt i = start[0]; i < start[0] + size[0]; ++i, ++row)
       {
         const std::array<PetscInt, 3> f{{i, j, k}};
-        // per axis: the parent coarse cell (weight 3/4) and the coarse neighbour on
-        // the fine cell's side (weight 1/4); the tensor product over the axes
+        // tensor product of the per-axis parent and neighbour weights
         for (const auto e : make_range(entries))
         {
           std::array<PetscInt, 3> c{{0, 0, 0}};

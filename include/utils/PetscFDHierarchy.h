@@ -50,14 +50,13 @@ Partition gatherPartition(const DomainAction & domain);
 /// communicator with the ranks renumbered in the DMDA's rank order (free with MPI_Comm_free)
 MPI_Comm dmdaComm(const Partition & partition);
 
-/// largest |offset| of the stencil, and whether it has off-axis (corner) entries
+/// stencil width for the DMDA: max |offset|, at least 1
 PetscInt stencilWidth(const std::vector<FDStencilEntry> & stencil);
 bool needsBoxStencil(const std::vector<FDStencilEntry> & stencil);
 
 /**
  * Number of multigrid levels (fine level included). A level is coarsened while
- * every global extent is even, the coarse extent stays at least 8 cells (the
- * smallest grid the coarse direct solve is worth stopping at), and every rank
+ * every global extent is even, the coarse extent stays >= 8 cells, and every rank
  * keeps at least stencil_width cells per axis (a DMDA requirement).
  */
 unsigned int countLevels(const Partition & partition, PetscInt stencil_width);

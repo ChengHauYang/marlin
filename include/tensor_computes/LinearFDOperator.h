@@ -54,7 +54,6 @@ public:
   /// Definiteness of the operator's action A (as written, before any sign change)
   enum class Definiteness
   {
-    /// symmetric positive definite
     POSITIVE_DEFINITE,
     /// symmetric positive semidefinite, nullspace = constants (e.g. -Laplacian, periodic)
     POSITIVE_SEMIDEFINITE,
@@ -62,7 +61,6 @@ public:
     OTHER
   };
 
-  /// Definiteness of this operator's action
   virtual Definiteness definiteness() const = 0;
 
   /// Name of the buffer the operator acts on
