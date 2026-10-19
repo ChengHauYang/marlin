@@ -1370,7 +1370,16 @@ the relevant comparison.
 and the PETSc-options-reuse mechanism end to end, in the matrix-free mode
 R6/PR1a is expected to favor.
 
-\status{proposed.}
+\status{implemented as \texttt{ImplicitFDSolver} (branch \texttt{implicit\_fd\_solver}, issue \#184),
+independently reviewed, findings addressed; PR open against \texttt{devel}, not merged.
+Backends: PETSc KSPCG + PCMG (CPU, CUDA) and torch PCG (any device, default on MPS).
+\texttt{TimeDerivativeOperator} (PR5a) was pulled forward. Tests pass on CPU at 1, 2 and 4 ranks,
+MPS and CUDA (H200). Physics record (CPU, $l_{tol}=10^{-12}$, $n=32\to256$): Poisson MMS
+observed order 2.00 (3-point) and 4.00 (5-point) for both backends, identical errors;
+backward Euler against the exact spectral BE solution, order 2.00 / 4.00, while the FFT
+integrator (AdamsBashforthMoulton AB1, the FFTSemiImplicit update) matches that solution to
+$10^{-15}$. H200, $n=256$: 7 PCMG iterations, no host/device copies in \texttt{KSPSolve}
+with Jacobi smoothing on every level.}
 
 \pr{4}{Boundary Terms in Matrix-Free Operator Application (connect PR1 + PR3)}
 \textbf{Scope:} \texttt{PetscFDSolverBase}'s \texttt{MatMult} callback and
@@ -1527,11 +1536,11 @@ PR1b & Multigrid spikes $\to$ hybrid design & reviewed, findings addressed; not 
 PR2 & DMDA/decomposition compatibility spike & spike implemented, unmerged & passes 1--8 ranks \\
 PR2b & Multi-rank PCMG on torch shells & spike done (\texttt{b3dcd72}) & PETSc-owned hierarchy + cell-centred transfer adopted (user, 2026-10-18) \\
 PR2c & Non-SPD + torch PCSHELL smoother + fusion & done (\texttt{40f6977}, \texttt{65109ae}) & GS robust for upwind; Cheby/Jacobi fails at Pe $=10$; central Pe $\ge1$ deferred; CUDA traced 2.4--3.2$\times$ eager, +graph capture 1.8$\times$ more at $n=256$, none at $n\ge1024$ \\
-PR3 & PetscFDSolverBase, single field, matrix-free & proposed & --- \\
+PR3 & ImplicitFDSolver (was PetscFDSolverBase), single field, matrix-free & implemented, reviewed; PR open, not merged & MMS and BE cross-validation orders 2/4, CPU 1--4 ranks, MPS, H200 \\
 PR4 & BC terms in matrix-free operator application & proposed & --- \\
 PR4a & AMG-preconditioned mixed mode (matrix-free Amat + assembled Pmat), contingent & proposed & --- \\
 PR5 & FiniteDifferenceDiffusion + lagged remainder & proposed & --- \\
-PR5a & TimeDerivativeOperator + steady-field mixing & proposed & --- \\
+PR5a & TimeDerivativeOperator + steady-field mixing & TimeDerivativeOperator done in PR3; mixing proposed & --- \\
 PR6 & PicardTensorSolver, two-field coupling & proposed & --- \\
 PR7 & SBM/KKS no-flux port & proposed & --- \\
 PR8 & Monolithic groundwork & deferred & --- \\
