@@ -151,6 +151,8 @@ substeps = 1000
     type = PerfGraphData
     section_name = TensorProblem::tensorSolve
     data_type = TOTAL
+    # the section is registered by the first solve, after the initial postprocessor pass
+    must_exist = false
   []
 []
 
