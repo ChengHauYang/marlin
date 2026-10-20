@@ -195,7 +195,15 @@
       input = robin_steady_state.i
       cli_args = 'TensorComputes/BCs/right/a=-40' # a/2 + b/dx = -20 + 1/0.05
       expect_err = 'a/2 \+ b/dx must be nonzero'
-      detail = 'and when the Robin ghost-value denominator a/2 + b/dx is zero.'
+      detail = 'and when the Robin ghost-value denominator a/2 + b/dx is zero,'
+    []
+    [robin_zero_second_layer_denominator]
+      type = RunException
+      input = robin_steady_state.i
+      # a/2 + b/(3dx) = -20/3 + 1/0.15
+      cli_args = 'TensorComputes/BCs/right/a=-13.333333333333334 TensorComputes/Solve/dt/stencil_width=5'
+      expect_err = 'requires a/2 \+ b/\(3\*dx\) to be nonzero'
+      detail = 'or, with two ghost layers, when a/2 + b/(3dx) is zero.'
     []
   []
 []

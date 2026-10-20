@@ -64,6 +64,12 @@ TensorRobinBC::fillGhostCellsStatic(torch::Tensor & buffer,
   if (ghost_layers > 2)
     ::mooseError(
         "TensorRobinBC fills at most two ghost layers, but ", ghost_layers, " were requested.");
+  // the second ghost layer divides by a/2 + b/(3dx) (the constructor checks a/2 + b/dx)
+  if (ghost_layers == 2 &&
+      std::abs(a / 2.0 + b / (3.0 * dx)) <= 1e-12 * (std::abs(a) / 2.0 + std::abs(b) / (3.0 * dx)))
+    ::mooseError("TensorRobinBC with two ghost layers requires a/2 + b/(3*dx) to be nonzero (dx = ",
+                 dx,
+                 " is the grid spacing normal to the face).");
 
   // Marlin's real-space grid is cell-centered (axis built from
   // min+dx/2 ... max-dx/2), so for either face the boundary sits at the
