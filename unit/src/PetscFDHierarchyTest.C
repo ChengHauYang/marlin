@@ -21,7 +21,9 @@ namespace
 /**
  * A partition of n cells per axis over the ranks of MPI_COMM_WORLD: 4 ranks split
  * Marlin axes 0 and 1 in two, any other count splits axis 0. Slab sizes follow
- * DomainAction::partitionHepler (32 cells on 3 ranks: 10, 11, 11).
+ * DomainAction::partitionHepler (32 cells on 3 ranks: 10, 11, 11). The tests are
+ * meant for at most 4 ranks: on more, the small grids leave a rank fewer coarse cells
+ * than the stencil width and the expected level counts no longer hold.
  */
 PetscFD::Partition
 uniformPartition(unsigned int dim, int64_t n)
