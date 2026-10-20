@@ -4,13 +4,9 @@
 #   C(x, t) = C1 * erfc(x / (2*sqrt(D*t)))
 # (special case of (3.13) with C0 = 0, using erfc = 1 - erf).
 #
-# Pseudo-1D domain: ny = 1 with Y periodic, so the only non-trivial direction is X.
-# D = 1, so sqrt(D*t) = 1 at t = 1 (the comparison time). The domain extends from
-# x = 0 to x = 10*sqrt(D*t) = 10 diffusion lengths, far enough that the true
-# semi-infinite solution's value there (erfc(10) ~ 2e-45) is indistinguishable from
-# zero -- the finite far boundary's Dirichlet condition (clamped to the x=0 value,
-# i.e. zero disturbance from the IC) does not measurably affect the solution near
-# x = 0 by the comparison time.
+# Pseudo-1D (ny = 1, Y periodic), D = 1. The domain extends 10 diffusion lengths at
+# the comparison time t = 1 (erfc(10) ~ 2e-45), so the far Dirichlet u = 0 does not
+# measurably affect the solution near x = 0.
 [Domain]
   dim = 2
   nx = 100
@@ -24,11 +20,7 @@
 []
 
 [TensorComputes]
-  # No [Initialize] block: PlainTensorBuffer::init() already zero-initializes every
-  # buffer (torch::zeros(...)) before any compute runs, which is exactly the C0 = 0
-  # initial condition this test needs -- avoids ParsedCompute's "0 + 0*y"/"0*x"-style
-  # algebraic-simplification-to-a-bare-scalar pitfall (see dirichlet_laplacian_check.i
-  # for the companion, nonzero-uniform-value case of the same underlying limitation).
+  # no [Initialize]: buffers start at zero, the C0 = 0 initial condition
   [BCs]
     [left]
       type = TensorDirichletBC

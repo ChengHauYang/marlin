@@ -10,22 +10,12 @@
 # du/dn = alpha*(h0 - u) rearranges to alpha*u + du/dn = alpha*h0, i.e.
 # a = alpha, b = 1, c = alpha*h0.
 #
-# Deliberately uses alpha = +2 (not OGS's own alpha = -2): TensorRobinBC's
-# ghost-fill coefficient on u0 is -(a/2 - b/dx)/(a/2 + b/dx), which has
-# magnitude < 1 (damping) for a > 0 but magnitude > 1 (amplifying) for a < 0 at
-# any dx. OGS's alpha = -2 is solved there as a pure steady linear system, with
-# no explicit time relaxation; here the IC is relaxed toward steady state via
-# RealSpaceForwardEuler, which diverges under an amplifying ghost coefficient
-# (confirmed by direct run: max_error grows to 1e6+ by t=4 with alpha = -2).
-# alpha = +2 is the stable branch of the exact same closed-form linear solution
-# above, physically a boundary that loses more heat the hotter it is (ordinary
-# convective/radiative cooling), consistent with a stable relaxation. With
-# alpha = 2, h0 = 1.5, g_D = 1, the exact solution is h(x) = x/3 + 1.
+# Uses alpha = +2 rather than OGS's alpha = -2: the ghost coefficient on u0,
+# -(a/2 - b/dx)/(a/2 + b/dx), has magnitude > 1 for a < 0, so explicit relaxation to
+# the steady state diverges (OGS solves the steady system directly). With alpha = 2,
+# h0 = 1.5 and g_D = 1 the exact solution is h(x) = x/3 + 1.
 #
-# Pseudo-1D domain: ny = 1 with Y periodic, so the only non-trivial direction is X.
-# The IC deliberately does not match the steady profile (nor the BCs pointwise),
-# so this is a genuine relaxation-to-steady-state check, not an instantaneous one
-# (cf. dirichlet_linear.i, the equivalent check for the pure-Dirichlet case).
+# Y is periodic, and the IC matches neither the steady profile nor the BCs.
 [Domain]
   dim = 2
   nx = 20
@@ -52,8 +42,6 @@
 [TensorComputes]
   [Initialize]
     [u_ic]
-      # Not the steady solution (constant, no x-dependence) and not matching the BCs
-      # pointwise.
       type = MooseFunctionTensor
       buffer = u
       function = u_ic_func
@@ -114,10 +102,7 @@
 
 [Executioner]
   type = Transient
-  # dx=0.05, dy=0.25; explicit-diffusion CFL limit ~1/(2*(1/dx^2+1/dy^2)) ~= 1.2e-3,
-  # substeps=10 above divides dt into 10 explicit sub-updates, so the effective
-  # per-substep step is dt/10 and must itself respect the CFL limit (same grid and
-  # margin as dirichlet_linear.i).
+  # same grid and CFL margin as dirichlet_linear.i
   dt = 1e-2
   num_steps = 400
 []

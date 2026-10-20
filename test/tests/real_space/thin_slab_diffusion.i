@@ -3,21 +3,13 @@
 # to a thin slab -h < x < h, diffusing into an infinite medium, has the exact solution
 #   C(x, t) = (C0/2) * { erf[(h-x)/(2*sqrt(D*t))] + erf[(h+x)/(2*sqrt(D*t))] }
 #
-# Pseudo-1D domain: ny = 1 with Y periodic, so the only non-trivial direction is X.
-# D = 1, h = 1. The domain is symmetric about x = 0 and extends to
-# +/- 10 diffusion lengths beyond the slab edge at the comparison time t = 1
-# (sqrt(D*t) = 1), far enough that the true infinite-medium solution's value there
-# is indistinguishable from zero -- the finite domain's Dirichlet condition
-# (clamped to zero, the undisturbed far-field value) does not measurably affect
-# the solution near the slab by the comparison time.
+# Pseudo-1D (ny = 1, Y periodic), D = 1, h = 1. The X faces are 10 diffusion lengths
+# beyond the slab edge at the comparison time t = 1, so the far-field Dirichlet u = 0
+# does not measurably affect the solution near the slab.
 [Domain]
   dim = 2
-  # nx = 220 gives dx = 0.1, so x = +/-1 (the slab half-width h) lands exactly on a
-  # cell face. nx = 200 (dx = 0.11) does not, which left the box IC under-resolved:
-  # the cells landing fully inside |x| < 1 captured a width of 1.98 rather than the
-  # exact 2*h = 2.0, a ~1% total-mass deficit baked into the IC itself (exactly
-  # conserved thereafter by the solver) that dominated the error and did not shrink
-  # under dt or nx refinement, since it isn't ordinary FD truncation error.
+  # dx = 0.1 puts the slab edges x = +/-1 on cell faces, so the box IC holds exactly
+  # the slab mass 2*h*C0 (nx = 200 leaves a ~1% deficit that does not refine away)
   nx = 220
   ny = 1
   parallel_mode = REAL_SPACE
@@ -33,11 +25,7 @@
     [u_ic]
       type = ParsedCompute
       buffer = u
-      # C0 = 1 inside the slab |x| < h = 1, zero outside -- expressed via "if" so the
-      # AST retains its x-dependence (does not simplify to a bare scalar; see
-      # semi_infinite_diffusion.i, which avoids this by omitting [Initialize]
-      # entirely for an all-zero IC -- not available here since this IC is nonzero
-      # inside the slab).
+      # C0 = 1 inside the slab |x| < h = 1, zero outside
       expression = 'if(abs(x) < 1, 1, 0) + 0*y'
       extra_symbols = true
     []

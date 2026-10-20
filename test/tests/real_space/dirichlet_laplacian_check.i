@@ -20,14 +20,8 @@
 [TensorComputes]
   [Initialize]
     [u_ic]
-      # u = 1 + 2*x satisfies the Dirichlet values below exactly, including on the two
-      # boundary-adjacent rows, so the discrete Laplacian should be exactly zero at
-      # roundoff everywhere, instantaneously (no time-stepping). MooseFunctionTensor
-      # evaluates the function pointwise (no symbolic simplification), so an exact,
-      # purely x-dependent profile can be used directly here, unlike ParsedCompute's
-      # expression parser, which collapses a constant/zero-coefficient term on a
-      # required spatial axis (see dirichlet_linear.i's companion relaxation test,
-      # which still uses ParsedCompute since its IC is deliberately y-dependent).
+      # u = 1 + 2*x satisfies the Dirichlet values below exactly, so the discrete
+      # Laplacian is zero to roundoff everywhere, including the boundary-adjacent cells.
       type = MooseFunctionTensor
       buffer = u
       function = u_func
