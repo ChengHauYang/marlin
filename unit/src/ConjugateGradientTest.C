@@ -22,6 +22,22 @@ TEST(ConjugateGradientTest, solve2d)
   EXPECT_NEAR((Afunc(x) - b).norm().item<double>(), 0.0, 1e-9);
 }
 
+TEST(ConjugateGradientTest, exactInitialGuess)
+{
+  // r0 = 0 used to give p = 0 and alpha = 0/0 = NaN
+  const auto A = torch::tensor({{4.0, 1.0}, {1.0, 3.0}});
+  auto Afunc = [&A](const torch::Tensor & x) { return A.matmul(x); };
+  const auto x_exact = torch::tensor({0.25, -0.5});
+  const auto b = Afunc(x_exact);
+
+  const auto [x, it, norm] = MooseTensor::conjugateGradientSolve(
+      Afunc, b, x_exact, 1e-8, 100, [](const torch::Tensor & r) { return r; });
+
+  EXPECT_EQ(it, 0);
+  EXPECT_FALSE(torch::isnan(x).any().item<bool>());
+  EXPECT_NEAR((x - x_exact).norm().item<double>(), 0.0, 1e-14);
+}
+
 TEST(ConjugateGradientTest, solve4d)
 {
   const auto A = torch::tensor(

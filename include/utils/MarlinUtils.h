@@ -89,8 +89,10 @@ conjugateGradientSolve(T1 A,
   if (!maxiter)
     maxiter = b.numel();
 
-  // initial residual
+  // initial residual (an exact initial guess would give p = 0 and alpha = 0/0 below)
   torch::Tensor r = b - A(x);
+  if (const double r0_norm = global_norm(r); r0_norm <= tol * b_norm)
+    return {x, 0u, r0_norm};
 
   // Apply preconditioner (or identity)
   torch::Tensor z = M(r); // z = M^{-1} r
