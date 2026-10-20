@@ -48,7 +48,7 @@ F = '${h_eta}*(${rho_sq}*((c - (1-${h_eta})*(${c0_b} - ${c0_a}))-${c0_a})^2) + (
     type = ParsedFunction
     expression = 'if(x<x_min-${l},0,if(x>x_min+${l},1,0.5-0.5*cos(pi*(x-(x_min-${l}))/2/${l}) )) * if(x<x_max-${l},1,if(x>x_max+${l},0,0.5+0.5*cos(pi*(x-(x_max-${l}))/2/${l}) ))'
     symbol_names = 'x_min x_max y_min y_max'
-    symbol_values = '30 70 0 100'
+    symbol_values = '-20 20 -50 50'
   []
 []
 

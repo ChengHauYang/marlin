@@ -54,7 +54,7 @@
   type = RealSpaceForwardEuler
   buffer = u
   time_derivative = dudt
-  substeps = 10
+  substeps = 1000
 []
 
 [Postprocessors]
@@ -76,8 +76,8 @@
   type = Transient
   # dx = 0.05, dy = 0.25: explicit CFL limit 1/(2*(1/dx^2 + 1/dy^2)) ~= 1.2e-3,
   # above the substep dt/substeps = 1e-3.
-  dt = 1e-2
-  num_steps = 400
+  dt = 1
+  num_steps = 4
 []
 
 [Outputs]

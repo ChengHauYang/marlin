@@ -70,7 +70,7 @@
   type = RealSpaceForwardEuler
   buffer = u
   time_derivative = dudt
-  substeps = 10
+  substeps = 1000
 []
 
 [Postprocessors]
@@ -85,9 +85,9 @@
 [Executioner]
   type = Transient
   # same grid and CFL margin as dirichlet_linear.i; the Neumann face makes the slowest
-  # mode decay more slowly, so max_error needs 1500 steps to plateau
-  dt = 1e-2
-  num_steps = 1500
+  # mode decay more slowly, so max_error needs 15 steps to plateau
+  dt = 1
+  num_steps = 15
 []
 
 [Outputs]

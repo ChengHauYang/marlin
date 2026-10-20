@@ -50,7 +50,7 @@
   type = RealSpaceForwardEuler
   buffer = u
   time_derivative = dudt
-  substeps = 10
+  substeps = 1000
 []
 
 [Postprocessors]
@@ -64,8 +64,8 @@
 [Executioner]
   type = Transient
   # same grid and CFL margin as dirichlet_linear.i
-  dt = 1e-2
-  num_steps = 400
+  dt = 1
+  num_steps = 4
 []
 
 [Outputs]
