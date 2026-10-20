@@ -277,6 +277,7 @@ assembleStencilOperator(DM da, const std::vector<FDStencilEntry> & stencil, Pets
     values.push_back(value);
   }
 
+  PetscCallAbort(comm, MatZeroEntries(B));
   std::vector<MatStencil> cols(offsets.size());
   for (PetscInt k = info.start[2]; k < info.start[2] + info.size[2]; ++k)
     for (PetscInt j = info.start[1]; j < info.start[1] + info.size[1]; ++j)
@@ -284,7 +285,8 @@ assembleStencilOperator(DM da, const std::vector<FDStencilEntry> & stencil, Pets
       {
         MatStencil row{};
         row.i = i, row.j = j, row.k = k;
-        // periodic wrap of indices outside the domain is done by the DMDA
+        // periodic wrap of indices outside the domain is done by the DMDA; offsets that
+        // wrap onto the same column (e.g. +-4 on 8 cells) are added, hence ADD_VALUES
         for (const auto q : index_range(offsets))
         {
           cols[q] = row;
@@ -295,7 +297,7 @@ assembleStencilOperator(DM da, const std::vector<FDStencilEntry> & stencil, Pets
         PetscCallAbort(
             comm,
             MatSetValuesStencil(
-                B, 1, &row, PetscInt(cols.size()), cols.data(), values.data(), INSERT_VALUES));
+                B, 1, &row, PetscInt(cols.size()), cols.data(), values.data(), ADD_VALUES));
       }
   PetscCallAbort(comm, MatAssemblyBegin(B, MAT_FINAL_ASSEMBLY));
   PetscCallAbort(comm, MatAssemblyEnd(B, MAT_FINAL_ASSEMBLY));

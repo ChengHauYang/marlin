@@ -7,6 +7,7 @@
 /**********************************************************************/
 #include "PetscFDHierarchy.h"
 #include "FiniteDifferenceLaplacian.h"
+#include "FiniteDifferenceBiharmonic.h"
 #include "gtest/gtest.h"
 
 #include "libmesh/int_range.h"
@@ -289,4 +290,57 @@ TEST(PetscFDHierarchyTest, AssembledOperatorIsRediscretisation)
       }
       MPI_Comm_free(&comm);
     }
+}
+
+// On the coarsest level (8 cells per axis) the 5-point biharmonic's offsets +4 and -4
+// land on the same column; both must be added. A periodic mode is an eigenvector with
+// eigenvalue the square of the 5-point Laplacian symbol.
+TEST(PetscFDHierarchyTest, AssembledOperatorAddsWrappedOffsets)
+{
+  // each rank needs 4 coarse cells (the stencil width): at most 2 ranks
+  int size;
+  MPI_Comm_size(MPI_COMM_WORLD, &size);
+  if (size > 2)
+    GTEST_SKIP() << "needs at most 2 ranks";
+
+  const double pi = M_PI;
+  const int64_t n = 16;
+  const auto partition = uniformPartition(1, n);
+  MPI_Comm comm = PetscFD::dmdaComm(partition);
+  {
+    PetscFD::Hierarchy h;
+    PetscFD::buildHierarchy(partition, comm, 2, 4, false, h);
+
+    const int64_t nc = n / 2;
+    const std::vector<Real> dx{1.0 / nc};
+    const auto stencil = FiniteDifferenceBiharmonic::buildStencil(1, true, dx, 1.0);
+
+    Mat B;
+    PetscCallAbort(PETSC_COMM_WORLD, DMCreateMatrix(h.dms[1], &B));
+    PetscFD::assembleStencilOperator(h.dms[1], stencil, 1.0, B);
+
+    for (const int k : {1, 2, 3, 4})
+    {
+      const double theta = 2.0 * pi * k / nc;
+      const double symbol =
+          (2.5 - 8.0 / 3.0 * std::cos(theta) + 1.0 / 6.0 * std::cos(2.0 * theta)) / (dx[0] * dx[0]);
+      Vec u, Bu, expected;
+      PetscCallAbort(PETSC_COMM_WORLD, DMCreateGlobalVector(h.dms[1], &u));
+      PetscCallAbort(PETSC_COMM_WORLD, DMCreateGlobalVector(h.dms[1], &Bu));
+      PetscCallAbort(PETSC_COMM_WORLD, DMCreateGlobalVector(h.dms[1], &expected));
+      const auto mode = [&](const std::array<double, 3> & x)
+      { return std::cos(2.0 * pi * k * x[0] + 0.3); };
+      fillVec(h.dms[1], u, mode);
+      fillVec(h.dms[1],
+              expected,
+              [&](const std::array<double, 3> & x) { return symbol * symbol * mode(x); });
+      PetscCallAbort(PETSC_COMM_WORLD, MatMult(B, u, Bu));
+      EXPECT_LT(maxDiff(Bu, expected), 1e-10 * symbol * symbol) << "k " << k;
+      PetscCallAbort(PETSC_COMM_WORLD, VecDestroy(&u));
+      PetscCallAbort(PETSC_COMM_WORLD, VecDestroy(&Bu));
+      PetscCallAbort(PETSC_COMM_WORLD, VecDestroy(&expected));
+    }
+    PetscCallAbort(PETSC_COMM_WORLD, MatDestroy(&B));
+  }
+  MPI_Comm_free(&comm);
 }
