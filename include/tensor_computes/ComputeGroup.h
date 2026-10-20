@@ -36,6 +36,9 @@ public:
 
   std::size_t getComputeCount() const { return _compute_count; }
 
+  /// the grouped computes, in execution order
+  const std::vector<std::shared_ptr<TensorOperatorBase>> & getComputes() const { return _computes; }
+
 protected:
   void computeBufferInternal(bool ghost_exchange);
 

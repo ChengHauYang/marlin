@@ -23,8 +23,15 @@ zero-mean solution is returned.
 
 The solve stops when the unpreconditioned residual satisfies
 $\|b - A u\|_2 \le$ [!param](/TensorSolver/ImplicitFDSolver/l_tol) $\|b\|_2$, starting from the
-previous solution. A solve that does not converge within
-[!param](/TensorSolver/ImplicitFDSolver/l_max_its) iterations is an error.
+previous solution. When a solve does not converge within
+[!param](/TensorSolver/ImplicitFDSolver/l_max_its) iterations, a
+`TensorSolveIterationAdaptiveDT` time stepper retries the time step with a smaller time step
+(with one substep per time step); with any other time stepper it is an error. After the solve, the
+operators' output buffers hold the operators applied to the new solution.
+
+The [!param](/TensorSolver/ImplicitFDSolver/root_compute) is evaluated before every solve to
+update the explicit terms, such as the source. The field operators in it are skipped, since the
+solve applies them itself.
 
 The `PETSC` linear solver (the default except on MPS) is PETSc's conjugate gradient method
 preconditioned by geometric multigrid (`KSPCG` + `PCMG`), in double precision on CPU or CUDA. The

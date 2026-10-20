@@ -14,6 +14,7 @@
 
 #include <petscksp.h>
 
+#include <exception>
 #include <memory>
 
 class TensorBufferBase;
@@ -60,6 +61,8 @@ protected:
     /// MatMult context of the shell
     ImplicitFDSolver * solver = nullptr;
     Field * field = nullptr;
+    /// exception thrown by the operator action inside KSPSolve (rethrown after it)
+    std::exception_ptr exception;
   };
 
   struct Field
@@ -82,6 +85,16 @@ protected:
 
   virtual void substep() override;
 
+  /// iterations of a linear solve, and the reason it failed (empty if it converged)
+  struct SolveResult
+  {
+    unsigned int iterations = 0;
+    std::string failure;
+  };
+
+  /// collect the computes of the root compute other than the field operators
+  void findExplicitComputes();
+
   /// y = sum_i A_i x on the owned cells (x is copied into u's owned cells first)
   torch::Tensor applyOperator(Field & field, const torch::Tensor & x);
 
@@ -89,11 +102,10 @@ protected:
   Real diagonal(const Field & field) const;
 
   /// solve sum_i A_i x = b (with ||b||_2 = b_norm) by torch preconditioned CG, warm started from x
-  unsigned int
-  solveTorchPCG(Field & field, const torch::Tensor & b, Real b_norm, torch::Tensor & x);
+  SolveResult solveTorchPCG(Field & field, const torch::Tensor & b, Real b_norm, torch::Tensor & x);
 
   /// solve sum_i A_i x = b by PETSc KSPCG + PCMG, warm started from x (both contiguous)
-  unsigned int solvePetsc(Field & field, torch::Tensor & b, torch::Tensor & x);
+  SolveResult solvePetsc(Field & field, torch::Tensor & b, torch::Tensor & x);
 
   /// create the hierarchy, the level operators and the KSP of a field
   void setupPetsc(Field & field);
@@ -124,4 +136,8 @@ protected:
   const unsigned int _l_max_its;
 
   std::vector<Field> _fields;
+
+  /// computes of the root compute that update the explicit terms (not the field operators)
+  std::vector<TensorOperatorBase *> _explicit_computes;
+  bool _explicit_computes_found = false;
 };

@@ -11,15 +11,19 @@
 #include "TensorBufferBase.h"
 #include "DomainAction.h"
 #include "MarlinUtils.h"
+#include "ComputeGroup.h"
+#include "TransientBase.h"
+#include "TensorSolveIterationAdaptiveDT.h"
 
 #include "PetscSupport.h"
 
 #include "libmesh/int_range.h"
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <limits>
+#include <set>
+#include <sstream>
 
 // the PETSc backend on CUDA needs PETSc and torch both built with CUDA
 #if defined(__has_include)
@@ -31,6 +35,7 @@
 #define MARLIN_PETSC_CUDA 1
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
+#include <ATen/cuda/CUDAEvent.h>
 #include <petscdevice_cuda.h>
 #else
 #define MARLIN_PETSC_CUDA 0
@@ -130,6 +135,17 @@ ImplicitFDSolver::ImplicitFDSolver(const InputParameters & parameters)
   if (!sources.empty() && sources.size() != buffers.size())
     paramError("source", "Must be empty or have one entry per entry in 'buffer'.");
 
+  // PETSc matches option names case-insensitively, so such fields would share a prefix
+  for (const auto i : index_range(buffers))
+    for (const auto j : make_range(i))
+      if (MooseUtils::toLower(buffers[i]) == MooseUtils::toLower(buffers[j]))
+        paramError("buffer",
+                   "Fields '",
+                   buffers[j],
+                   "' and '",
+                   buffers[i],
+                   "' differ only in case, so their PETSc options prefixes would collide.");
+
   _fields.reserve(buffers.size());
   for (const auto i : make_range(buffers.size()))
   {
@@ -193,17 +209,45 @@ ImplicitFDSolver::ImplicitFDSolver(const InputParameters & parameters)
 }
 
 void
+ImplicitFDSolver::findExplicitComputes()
+{
+  // the root compute updates the explicit terms; the field operators are applied by the
+  // solve itself, so they are left out (an automatic root compute contains every compute)
+  std::set<const TensorOperatorBase *> operators;
+  for (const auto & field : _fields)
+    operators.insert(field._operators.begin(), field._operators.end());
+  const auto * group = dynamic_cast<const ComputeGroup *>(_compute.get());
+  if (group)
+    for (const auto & cmp : group->getComputes())
+      if (!operators.count(cmp.get()))
+        _explicit_computes.push_back(cmp.get());
+
+  // a group without field operators (or a single explicit compute) runs as a whole, keeping
+  // its JIT and debug checks
+  if (group ? _explicit_computes.size() == group->getComputes().size()
+            : !operators.count(_compute.get()))
+    _explicit_computes = {_compute.get()};
+  _explicit_computes_found = true;
+}
+
+void
 ImplicitFDSolver::substep()
 {
   // update the explicit terms (sources)
-  _compute->realSpaceComputeBuffer();
+  if (!_explicit_computes_found)
+    findExplicitComputes();
+  for (auto * cmp : _explicit_computes)
+    cmp->realSpaceComputeBuffer();
   forwardBuffers();
 
   _iterations = 0;
+  _is_converged = true;
+  std::vector<torch::Tensor> u_old;
   for (auto & field : _fields)
   {
     // u is Krylov scratch below; give it its own storage (advanceState() keeps a
     // shallow copy in its old states)
+    u_old.push_back(field._u);
     field._u = field._u.clone();
 
     // b = sum_i r_i + f, evaluated while u still holds u_old
@@ -236,25 +280,44 @@ ImplicitFDSolver::substep()
     // warm start from u_old
     torch::Tensor x = field._u_base.ownedView().clone(torch::MemoryFormat::Contiguous);
 
-    unsigned int iterations = 0;
+    SolveResult result;
     const Real b_norm = std::sqrt(_domain.allreduceSum((b * b).sum()).cpu().item<double>());
     if (b_norm == 0.0)
       // the zero-mean solution of A x = 0 is x = 0
       x.zero_();
     else if (_linear_solver == LinearSolver::PETSC)
-      iterations = solvePetsc(field, b, x);
+      result = solvePetsc(field, b, x);
     else
-      iterations = solveTorchPCG(field, b, b_norm, x);
+      result = solveTorchPCG(field, b, b_norm, x);
+    _iterations += result.iterations;
+
+    if (!result.failure.empty())
+    {
+      // only a TensorSolveIterationAdaptiveDT time stepper cuts dt on a failed solve, and
+      // the old states are already advanced past a failed later substep
+      const auto * transient = dynamic_cast<const TransientBase *>(_app.getExecutioner());
+      if (_substeps > 1 || !transient ||
+          !dynamic_cast<const TensorSolveIterationAdaptiveDT *>(transient->getTimeStepper()))
+        mooseError(result.failure,
+                   " Use the TensorSolveIterationAdaptiveDT time stepper (with substeps = 1) to "
+                   "retry the step with a smaller dt.");
+
+      _console << result.failure << '\n';
+      // retry from the previous state of every field solved so far
+      for (const auto i : index_range(u_old))
+        _fields[i]._u = u_old[i];
+      _is_converged = false;
+      return;
+    }
 
     if (field._singular)
       x -= _domain.allreduceSum(x.sum()) / static_cast<Real>(_domain.getNumberOfCells());
 
-    field._u_base.ownedView().copy_(x);
+    // write x into u and apply the operators to it once more, so that their output buffers
+    // hold A_i u rather than A_i of the last Krylov vector
+    applyOperator(field, x);
     _tensor_problem.exchangeGhostLayers(field._name, _tensor_problem.getMaxGhostLayer());
-
-    _iterations += iterations;
   }
-  _is_converged = true;
 }
 
 torch::Tensor
@@ -283,7 +346,7 @@ ImplicitFDSolver::diagonal(const Field & field) const
   return diag;
 }
 
-unsigned int
+ImplicitFDSolver::SolveResult
 ImplicitFDSolver::solveTorchPCG(Field & field,
                                 const torch::Tensor & b,
                                 Real b_norm,
@@ -298,19 +361,18 @@ ImplicitFDSolver::solveTorchPCG(Field & field,
   const auto [x_new, iterations, res_norm] =
       MooseTensor::conjugateGradientSolve(A, b, x, _l_tol, _l_max_its, M, reduce_sum);
 
-  if (res_norm > _l_tol * b_norm)
-    mooseError("The TORCH_PCG solve of field '",
-               field._name,
-               "' did not converge in ",
-               _l_max_its,
-               " iterations (relative residual ",
-               res_norm / b_norm,
-               ", l_tol = ",
-               _l_tol,
-               ").");
+  // written so that a NaN residual counts as not converged
+  if (!(res_norm <= _l_tol * b_norm))
+  {
+    std::ostringstream failure;
+    failure << "The TORCH_PCG solve of field '" << field._name << "' did not converge in "
+            << _l_max_its << " iterations (relative residual " << res_norm / b_norm
+            << ", l_tol = " << _l_tol << ").";
+    return {iterations, failure.str()};
+  }
 
   x = x_new;
-  return iterations;
+  return {iterations, ""};
 }
 
 ImplicitFDSolver::PetscSolve::~PetscSolve()
@@ -372,16 +434,11 @@ private:
 };
 #endif
 
-/// options prefix of a field's KSP (PETSc prefixes are lower case and end in '_')
+/// options prefix of a field's KSP
 std::string
 petscPrefix(const std::string & name)
 {
-  std::string prefix = name + "_";
-  std::transform(prefix.begin(),
-                 prefix.end(),
-                 prefix.begin(),
-                 [](unsigned char c) { return std::tolower(c); });
-  return prefix;
+  return name + "_";
 }
 
 bool
@@ -594,7 +651,7 @@ ImplicitFDSolver::assembleCoarseLevels(Field & field)
   ps.assembled_stencil = stencil;
 }
 
-unsigned int
+ImplicitFDSolver::SolveResult
 ImplicitFDSolver::solvePetsc(Field & field, torch::Tensor & b, torch::Tensor & x)
 {
   if (!field._petsc)
@@ -608,6 +665,13 @@ ImplicitFDSolver::solvePetsc(Field & field, torch::Tensor & b, torch::Tensor & x
   if (onCuda())
   {
 #if MARLIN_PETSC_CUDA
+    // b and x were written on torch's stream; KSPSolve runs on PETSc's
+    cudaStream_t petsc_stream;
+    PetscCallAbort(comm, PetscGetCurrentCUDAStream(&petsc_stream));
+    const auto petsc = c10::cuda::getStreamFromExternal(petsc_stream, c10::cuda::current_device());
+    at::cuda::CUDAEvent written;
+    written.record(c10::cuda::getCurrentCUDAStream());
+    written.block(petsc);
     PetscCallAbort(comm, VecCUDAPlaceArray(ps.b, b.data_ptr<PetscScalar>()));
     PetscCallAbort(comm, VecCUDAPlaceArray(ps.x, x.data_ptr<PetscScalar>()));
 #endif
@@ -618,13 +682,20 @@ ImplicitFDSolver::solvePetsc(Field & field, torch::Tensor & b, torch::Tensor & x
     PetscCallAbort(comm, VecPlaceArray(ps.x, x.data_ptr<PetscScalar>()));
   }
 
-  PetscCallAbort(comm, KSPSolve(ps.ksp, ps.b, ps.x));
+  ps.exception = nullptr;
+  const auto ierr = KSPSolve(ps.ksp, ps.b, ps.x);
 
   if (onCuda())
   {
 #if MARLIN_PETSC_CUDA
     PetscCallAbort(comm, VecCUDAResetArray(ps.b));
     PetscCallAbort(comm, VecCUDAResetArray(ps.x));
+    // and torch reads x after PETSc has written it
+    cudaStream_t petsc_stream;
+    PetscCallAbort(comm, PetscGetCurrentCUDAStream(&petsc_stream));
+    at::cuda::CUDAEvent solved;
+    solved.record(c10::cuda::getStreamFromExternal(petsc_stream, c10::cuda::current_device()));
+    solved.block(c10::cuda::getCurrentCUDAStream());
 #endif
   }
   else
@@ -633,19 +704,21 @@ ImplicitFDSolver::solvePetsc(Field & field, torch::Tensor & b, torch::Tensor & x
     PetscCallAbort(comm, VecResetArray(ps.x));
   }
 
+  // an exception from the operator kernels (caught in shellMult) is rethrown here, outside
+  // PETSc's frames
+  if (ps.exception)
+    std::rethrow_exception(ps.exception);
+  PetscCallAbort(comm, ierr);
+
   KSPConvergedReason reason;
   PetscInt iterations;
   PetscCallAbort(comm, KSPGetConvergedReason(ps.ksp, &reason));
   PetscCallAbort(comm, KSPGetIterationNumber(ps.ksp, &iterations));
   if (reason < 0)
-    mooseError("The PETSC solve of field '",
-               field._name,
-               "' failed after ",
-               iterations,
-               " iterations: ",
-               KSPConvergedReasons[reason],
-               ".");
-  return iterations;
+    return {static_cast<unsigned int>(iterations),
+            "The PETSC solve of field '" + field._name + "' failed after " +
+                std::to_string(iterations) + " iterations: " + KSPConvergedReasons[reason] + "."};
+  return {static_cast<unsigned int>(iterations), ""};
 }
 
 PetscErrorCode
@@ -673,12 +746,24 @@ ImplicitFDSolver::shellMult(Mat A, Vec x, Vec y)
     guard = std::make_unique<PetscStreamGuard>();
   }
 #endif
-  const auto shape = ps->field->_u_base.ownedView().sizes().vec();
-  const auto in = torch::from_blob(const_cast<PetscScalar *>(x_array), shape, options);
-  torch::from_blob(y_array, shape, options).copy_(ps->solver->applyOperator(*ps->field, in));
+  // C++ exceptions must not unwind through PETSc's C frames: keep it for solvePetsc
+  PetscErrorCode ierr = PETSC_SUCCESS;
+  try
+  {
+    const auto shape = ps->field->_u_base.ownedView().sizes().vec();
+    const auto in = torch::from_blob(const_cast<PetscScalar *>(x_array), shape, options);
+    torch::from_blob(y_array, shape, options).copy_(ps->solver->applyOperator(*ps->field, in));
+  }
+  catch (...)
+  {
+    ps->exception = std::current_exception();
+    ierr = PETSC_ERR_LIB;
+  }
 
   PetscCall(VecRestoreArrayReadAndMemType(x, &x_array));
   PetscCall(VecRestoreArrayWriteAndMemType(y, &y_array));
+  PetscCheck(
+      ierr == PETSC_SUCCESS, PETSC_COMM_SELF, ierr, "The operator action threw an exception");
   PetscFunctionReturn(PETSC_SUCCESS);
 }
 
