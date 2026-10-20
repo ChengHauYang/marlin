@@ -12,14 +12,15 @@ solves (`substeps`), and the `wall_time` postprocessor gives the run time.
 
 ```
 ./run_scaling.sh
-SIZES="1024 2048" STEPS=1 BACKENDS=PETSC ./run_scaling.sh
+SIZES="1024 2048" BACKENDS=PETSC ./run_scaling.sh
 DEVICE=cpu ./run_scaling.sh     # PETSc and torch on a Mac CPU
-L_TOL=1e-5 ./run_scaling.sh     # MPS, single precision (TORCH_PCG only)
 ```
 
 The device defaults to `cuda` when `nvidia-smi` is present, `mps` on macOS and
-`cpu` otherwise. The per-run time limit needs `timeout` (`gtimeout` from
-Homebrew coreutils on macOS); without it the runs are unlimited.
+`cpu` otherwise. On MPS (single precision, no PETSc) only `TORCH_PCG` runs, with
+`l_tol = 1e-5`, so those timings are not like-for-like with the double precision
+runs. The time per step excludes the first step, which carries the startup and
+solver setup.
 
 Results go to `results/` (`summary.csv`, one log and postprocessor CSV per
 run, `provenance.txt`).

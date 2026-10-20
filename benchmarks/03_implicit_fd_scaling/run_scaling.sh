@@ -11,11 +11,11 @@
 #
 # Usage (from this directory, after building marlin-opt):
 #   ./run_scaling.sh
-#   SIZES="1024 2048" STEPS=2 BACKENDS=PETSC ./run_scaling.sh
-#   DEVICE=cpu ./run_scaling.sh            # PETSc and torch on a Mac CPU
-#   L_TOL=1e-5 ./run_scaling.sh            # MPS (the default device on a Mac)
+#   SIZES="1024 2048" BACKENDS=PETSC ./run_scaling.sh
+#   DEVICE=cpu ./run_scaling.sh    # PETSc and torch on a Mac CPU
 #
-# Results: results/<backend>_<n>.{log,csv} and results/summary.csv
+# Results: results/<backend>_<n>.{log,csv} and results/summary.csv. The time per
+# step excludes the first step, which carries the startup and solver setup.
 
 set -euo pipefail
 
@@ -31,39 +31,27 @@ if [ -z "${DEVICE:-}" ]; then
     DEVICE=cpu
   fi
 fi
-# PETSc is not available on MPS (use DEVICE=cpu for PETSc on a Mac)
-if [ "$DEVICE" = mps ]; then
-  BACKENDS=${BACKENDS:-"TORCH_PCG"}
-else
-  BACKENDS=${BACKENDS:-"PETSC TORCH_PCG"}
-fi
-# time steps per run (each is `substeps` = 1000 linear solves, as in the input)
-STEPS=${STEPS:-2}
-# per-run limit (s); a run that hits it is reported as TIMEOUT. Needs `timeout`
-# (GNU coreutils; `gtimeout` on macOS from Homebrew coreutils), else no limit.
-TIME_LIMIT=${TIME_LIMIT:-1800}
-# optional linear tolerance, e.g. L_TOL=1e-5 on MPS (single precision cannot reach
-# the default 1e-8); unset keeps the input's default
-L_TOL=${L_TOL:-}
+# time steps per run (each is `substeps` = 1000 linear solves, as in the input);
+# at least 2, since the first step is excluded from the time per step
+STEPS=${STEPS:-3}
 MARLIN=${MARLIN:-../../marlin-opt}
 INPUT=../01_spinodal_decomposition/1a_implicit_fd.i
 OUT=results
 # -----------------------------------------------------------------------------
 
-if command -v timeout > /dev/null 2>&1; then
-  limit=(timeout "$TIME_LIMIT")
-elif command -v gtimeout > /dev/null 2>&1; then
-  limit=(gtimeout "$TIME_LIMIT")
-else
-  echo "warning: no timeout command found, runs have no time limit"
-  limit=()
-fi
+# MPS is single precision and has no PETSc: torch PCG only, with the l_tol of the
+# MPS tests (single precision cannot reach the input's 1e-8)
 extra=()
-[ -n "$L_TOL" ] && extra+=(TensorSolver/l_tol=$L_TOL)
+if [ "$DEVICE" = mps ]; then
+  BACKENDS=${BACKENDS:-"TORCH_PCG"}
+  extra=(TensorSolver/l_tol=1e-5)
+else
+  BACKENDS=${BACKENDS:-"PETSC TORCH_PCG"}
+fi
 
 mkdir -p "$OUT"
 summary="$OUT/summary.csv"
-echo "backend,n,dofs,steps,status,wall_time_s,wall_time_per_step_s" > "$summary"
+echo "backend,n,dofs,steps,status,wall_time_s,time_per_step_s" > "$summary"
 
 # provenance
 {
@@ -71,8 +59,7 @@ echo "backend,n,dofs,steps,status,wall_time_s,wall_time_per_step_s" > "$summary"
   echo "host: $(hostname)"
   echo "git: $(git rev-parse HEAD 2>/dev/null || echo unknown)"
   echo "device: $DEVICE"
-  echo "backends: $BACKENDS"
-  echo "l_tol: ${L_TOL:-input default}"
+  echo "extra arguments: ${extra[*]+"${extra[*]}"}"
   nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader 2>/dev/null || true
 } > "$OUT/provenance.txt"
 
@@ -80,31 +67,29 @@ for n in $SIZES; do
   for backend in $BACKENDS; do
     base="$OUT/${backend}_${n}"
     echo "== $backend n=$n ($((n * n)) dofs), $STEPS steps"
+    rm -f "$base.csv" "$base.log"
 
     status=OK
-    # ${a[@]+"${a[@]}"}: empty arrays expand to nothing under set -u in bash 3.2 (macOS)
-    ${limit[@]+"${limit[@]}"} "$MARLIN" -i "$INPUT" \
+    # ${a[@]+"${a[@]}"}: an empty array expands to nothing under set -u in bash 3.2 (macOS)
+    "$MARLIN" -i "$INPUT" \
       Domain/nx=$n Domain/ny=$n \
       Executioner/num_steps=$STEPS \
       TensorSolver/linear_solver=$backend \
       "TensorOutputs/active=''" \
       Outputs/file_base="$base" \
       ${extra[@]+"${extra[@]}"} \
-      --compute-device="$DEVICE" > "$base.log" 2>&1 || status=$?
-    [ "$status" = 124 ] && status=TIMEOUT
-    [ "$status" != OK ] && [ "$status" != TIMEOUT ] && status="FAILED($status)"
+      --compute-device="$DEVICE" > "$base.log" 2>&1 || status="FAILED($?)"
 
-    # wall_time is the last column of the postprocessor CSV; take the last row
-    wall=""
-    rows=0
-    if [ -f "$base.csv" ]; then
-      wall=$(tail -n 1 "$base.csv" | awk -F, '{print $NF}')
-      rows=$(($(wc -l < "$base.csv") - 1)) # minus the header (output is on TIMESTEP_END only)
-    fi
-    per_step=""
-    [ -n "$wall" ] && [ "$rows" -gt 0 ] && per_step=$(awk -v w="$wall" -v r="$rows" 'BEGIN{print w / r}')
+    # wall_time column of the postprocessor CSV (one row per step): the last value and
+    # the time per step after the first step
+    read -r rows wall per_step < <(
+      awk -F, 'NR == 1 { for (i = 1; i <= NF; i++) if ($i == "wall_time") c = i; next }
+               c { w[++r] = $c }
+               END { printf "%d %s %s\n", r, (r ? w[r] : "-"),
+                            (r > 1 ? (w[r] - w[1]) / (r - 1) : "-") }' \
+        "$base.csv" 2> /dev/null || echo "0 - -")
     echo "$backend,$n,$((n * n)),$rows,$status,$wall,$per_step" >> "$summary"
-    echo "   $status, wall_time=${wall:-n/a} s over $rows steps"
+    echo "   $status, wall_time=$wall s over $rows steps, $per_step s per step"
   done
 done
 
