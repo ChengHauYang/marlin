@@ -146,6 +146,8 @@ MarlinApp::registerAll(Factory & f, ActionFactory & af, Syntax & syntax)
   // TensorComputes/Solve Action
   registerDeep("TensorComputes/Solve", "add_tensor_compute");
   addTaskDependency("add_tensor_compute", "add_tensor_ic");
+  // BCs must exist before TensorProblem::init() checks them
+  addTaskDependency("add_tensor_compute", "add_tensor_boundary_condition");
 
   // TensorComputes/Postprocess Action
   registerDeep("TensorComputes/Postprocess", "add_tensor_postprocessor");

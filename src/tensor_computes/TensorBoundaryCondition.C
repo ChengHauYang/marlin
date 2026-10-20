@@ -17,7 +17,7 @@ const std::string face_names = "left right bottom top front back";
 std::string
 TensorBoundaryCondition::faceName(unsigned int face)
 {
-  return MooseEnum(face_names).getNames()[face];
+  return MooseUtils::toLower(MooseEnum(face_names).getNames()[face]);
 }
 
 InputParameters
