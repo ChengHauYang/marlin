@@ -61,6 +61,10 @@ TensorRobinBC::fillGhostCellsStatic(torch::Tensor & buffer,
                                     Real c,
                                     Real dx)
 {
+  if (ghost_layers > 2)
+    ::mooseError(
+        "TensorRobinBC fills at most two ghost layers, but ", ghost_layers, " were requested.");
+
   // Marlin's real-space grid is cell-centered (axis built from
   // min+dx/2 ... max-dx/2), so for either face the boundary sits at the
   // midpoint between the first interior cell (u0) and the first ghost cell

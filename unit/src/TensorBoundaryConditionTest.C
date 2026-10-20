@@ -114,3 +114,19 @@ TEST(TensorBoundaryConditionTest, SecondGhostLayer)
   checkSecondGhostLayer(/*a=*/0.0, /*b=*/1.0, /*c=*/-2.0, /*dx=*/0.1);
   checkSecondGhostLayer(/*a=*/2.0, /*b=*/3.0, /*c=*/1.25, /*dx=*/0.05);
 }
+
+TEST(TensorBoundaryConditionTest, MoreThanTwoGhostLayersIsAnError)
+{
+  auto buffer = torch::zeros({10}, MooseTensor::floatTensorOptions());
+  EXPECT_THROW(TensorRobinBC::fillGhostCellsStatic(buffer,
+                                                   /*is_upper_face=*/false,
+                                                   /*face_dim=*/0,
+                                                   /*ghost_layers=*/3,
+                                                   /*halo=*/3,
+                                                   /*owned_extent=*/4,
+                                                   1.0,
+                                                   0.0,
+                                                   0.0,
+                                                   0.1),
+               std::exception);
+}
