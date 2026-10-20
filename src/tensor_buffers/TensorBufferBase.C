@@ -82,11 +82,11 @@ TensorBufferBase::expand()
 torch::Tensor
 TensorBufferBase::ownedView() const
 {
-  return ownedView(getRawTensor());
+  return ownedViewOf(getRawTensor());
 }
 
 torch::Tensor
-TensorBufferBase::ownedView(const torch::Tensor & t) const
+TensorBufferBase::ownedViewOf(const torch::Tensor & t) const
 {
   const auto ghost = _tensor_problem->getMaxGhostLayer();
   if (ghost == 0)

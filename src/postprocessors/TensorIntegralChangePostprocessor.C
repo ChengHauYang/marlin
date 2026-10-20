@@ -36,7 +36,7 @@ TensorIntegralChangePostprocessor::execute()
   // owned cells only, so that ghost layers are not counted and the ranks' sums add up
   const auto u = _buffer_base.ownedView();
   if (!_u_old.empty())
-    _integral = torch::abs(u - _buffer_base.ownedView(_u_old[0])).sum().cpu().item<double>();
+    _integral = torch::abs(u - _buffer_base.ownedViewOf(_u_old[0])).sum().cpu().item<double>();
   else
     _integral = torch::abs(u).sum().cpu().item<double>();
   for (const auto dim : make_range(_domain.getDim()))

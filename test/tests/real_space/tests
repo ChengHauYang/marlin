@@ -217,6 +217,6 @@
     compute_devices = 'cpu cuda mps xpu'
     issues = '#122'
     design = TensorIntegralChangePostprocessor.md
-    requirement = 'The system shall compute the integral of the change of a buffer over a time step from the owned cells only, independent of the ghost layers and the number of ranks.'
+    requirement = 'The system shall compute the integral of the absolute change of a buffer over the last solver substep from the owned cells only, independent of the ghost layers and the number of ranks.'
   []
 []
