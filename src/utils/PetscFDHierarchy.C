@@ -326,7 +326,12 @@ cellCentredInterpolation(DM coarse, DM fine)
   }
 
   // DMDA global numbering: rank blocks in rank order p_0 + P_0 (p_1 + P_1 p_2),
-  // x fastest inside a block
+  // x fastest inside a block; offsets[q] is the first global index of rank q
+  const auto & P = coarse_info.procs;
+  std::vector<PetscInt> offsets(P[0] * P[1] * P[2] + 1, 0);
+  for (const auto q : make_range(offsets.size() - 1))
+    offsets[q + 1] = offsets[q] + slab_sizes[0][q % P[0]] * slab_sizes[1][(q / P[0]) % P[1]] *
+                                      slab_sizes[2][q / (P[0] * P[1])];
   const auto global_column = [&](std::array<PetscInt, 3> c)
   {
     std::array<PetscInt, 3> p{{0, 0, 0}};
@@ -335,14 +340,9 @@ cellCentredInterpolation(DM coarse, DM fine)
       c[a] = (c[a] + coarse_info.M[a]) % coarse_info.M[a];
       p[a] = std::upper_bound(bounds[a].begin(), bounds[a].end(), c[a]) - bounds[a].begin() - 1;
     }
-    const auto & P = coarse_info.procs;
     const PetscInt rank = p[0] + P[0] * (p[1] + P[1] * p[2]);
-    PetscInt offset = 0;
-    for (PetscInt q = 0; q < rank; ++q)
-      offset += slab_sizes[0][q % P[0]] * slab_sizes[1][(q / P[0]) % P[1]] *
-                slab_sizes[2][q / (P[0] * P[1])];
     const auto & s = slab_sizes;
-    return offset +
+    return offsets[rank] +
            ((c[2] - bounds[2][p[2]]) * s[1][p[1]] + (c[1] - bounds[1][p[1]])) * s[0][p[0]] +
            (c[0] - bounds[0][p[0]]);
   };
