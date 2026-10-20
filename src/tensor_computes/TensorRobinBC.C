@@ -7,6 +7,7 @@
 /**********************************************************************/
 
 #include "TensorRobinBC.h"
+#include "DomainAction.h"
 
 registerMooseObject("MarlinApp", TensorRobinBC);
 
@@ -28,8 +29,11 @@ TensorRobinBC::TensorRobinBC(const InputParameters & parameters)
     _b(getParam<Real>("b")),
     _c(getParam<Real>("c"))
 {
-  if (_a == 0.0 && _b == 0.0)
-    paramError("a", "At least one of 'a' and 'b' must be nonzero.");
+  // the ghost value divides by a/2 + b/dx (see ghostCoefficientOnU0); this also rejects a = b = 0
+  const auto dx = _domain.getGridSpacing()(faceDim());
+  if (std::abs(_a / 2.0 + _b / dx) <= 1e-12 * (std::abs(_a) / 2.0 + std::abs(_b) / dx))
+    paramError(
+        "a", "a/2 + b/dx must be nonzero (dx = ", dx, " is the grid spacing normal to the face).");
 }
 
 Real
@@ -125,7 +129,11 @@ TensorRobinBC::fillGhostCells(torch::Tensor & buffer,
 }
 
 std::pair<std::vector<FDStencilEntry>, Real>
-TensorRobinBC::stencilContribution(unsigned int /*ghost_layers*/, Real dx) const
+TensorRobinBC::stencilContribution(unsigned int ghost_layers, Real dx) const
 {
+  // only the first ghost relation is reported; a second ghost layer is not represented
+  if (ghost_layers != 1)
+    mooseError("TensorRobinBC::stencilContribution supports one ghost layer only.");
+
   return stencilContributionStatic(_dim, _a, _b, _c, dx);
 }

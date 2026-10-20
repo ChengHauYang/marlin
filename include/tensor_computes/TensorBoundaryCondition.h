@@ -15,9 +15,8 @@
  * Base class for boundary conditions on a real-space TensorBuffer field at a
  * non-periodic physical edge of the domain. Unlike a normal TensorOperator, a
  * boundary condition is not run by the ordinary compute list -- it is looked
- * up by TensorProblem::exchangeGhostLayers() (via
- * TensorProblem::getBoundaryConditionFor()) for the specific (variable, face)
- * it owns and invoked on demand to fill ghost cells.
+ * up by TensorProblem::exchangeGhostLayers() for the specific (variable, face)
+ * it acts on and invoked on demand to fill ghost cells.
  *
  * Not a LinearFDOperator: LinearFDOperator::stencilAt() returns only the
  * interior stencil terms (no RHS component), which doesn't fit a boundary
@@ -54,8 +53,8 @@ public:
   /// name of the TensorBuffer field this BC applies to
   const TensorInputBufferName & getVariableName() const { return _variable_name; }
 
-  /// true if this rank owns (physically holds) this face of the domain
-  bool ownsFace() const { return _owns_face; }
+  /// input-file name of a face ("left", "right", ...)
+  static std::string faceName(unsigned int face);
 
   /**
    * Fill the ghost layer(s) for this BC's variable on this rank's side of
@@ -90,7 +89,4 @@ protected:
 
   /// the field name this BC targets
   const TensorInputBufferName _variable_name;
-
-  /// per-rank ownership of _face, computed once in the constructor
-  bool _owns_face;
 };

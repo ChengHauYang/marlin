@@ -9,13 +9,24 @@
 #include "TensorBoundaryCondition.h"
 #include "DomainAction.h"
 
+namespace
+{
+const std::string face_names = "left right bottom top front back";
+}
+
+std::string
+TensorBoundaryCondition::faceName(unsigned int face)
+{
+  return MooseEnum(face_names).getNames()[face];
+}
+
 InputParameters
 TensorBoundaryCondition::validParams()
 {
   InputParameters params = TensorOperatorBase::validParams();
   params.addRequiredParam<TensorInputBufferName>("variable",
                                                  "The field this boundary condition applies to.");
-  MooseEnum boundary("left right bottom top front back");
+  MooseEnum boundary(face_names);
   params.addRequiredParam<MooseEnum>(
       "boundary", boundary, "Which face of the domain this boundary condition applies to.");
   params.addClassDescription("Base class for boundary conditions on a non-periodic real-space "
@@ -26,14 +37,10 @@ TensorBoundaryCondition::validParams()
 TensorBoundaryCondition::TensorBoundaryCondition(const InputParameters & parameters)
   : TensorOperatorBase(parameters),
     _face(getParam<MooseEnum>("boundary").getEnum<Face>()),
-    _variable_name(getParam<TensorInputBufferName>("variable")),
-    _owns_face(false)
+    _variable_name(getParam<TensorInputBufferName>("variable"))
 {
-  const auto rank = _domain.comm().rank();
-  std::array<int64_t, 3> begin, end;
-  _domain.getLocalBounds(rank, begin, end);
-  const auto & n_global = _domain.getGridSize();
-
-  const auto d = faceDim();
-  _owns_face = isUpperFace() ? (end[d] == n_global[d]) : (begin[d] == 0);
+  if (faceDim() >= _domain.getDim())
+    paramError("boundary", "This face does not exist in a ", _domain.getDim(), "D domain.");
+  if (_domain.getPeriodicDirections()[faceDim()])
+    paramError("boundary", "This face lies on a periodic direction.");
 }

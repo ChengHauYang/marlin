@@ -135,4 +135,58 @@
       detail = 'the elliptic Robin benchmark from the OpenGeoSys documentation (opengeosys.org/6.5.7/docs/benchmarks/elliptic/elliptic-robin).'
     []
   []
+  [bc_errors]
+    issues = '#122'
+    design = 'TensorRobinBC.md'
+    requirement = 'The system shall report an error for a real-space boundary condition '
+    [periodic_face]
+      type = RunException
+      input = neumann_linear.i
+      cli_args = 'TensorComputes/BCs/right/boundary=top'
+      expect_err = 'This face lies on a periodic direction'
+      detail = 'on a face of a periodic direction,'
+    []
+    [missing_face]
+      type = RunException
+      input = neumann_linear.i
+      cli_args = 'Domain/dim=3 Domain/nz=2 TensorComputes/BCs/right/boundary=back'
+      expect_err = "has no boundary condition on the right face"
+      detail = 'when a non-periodic face of a buffer read with ghost layers has none,'
+    []
+    [nonexistent_face]
+      type = RunException
+      input = neumann_linear.i
+      cli_args = 'TensorComputes/BCs/right/boundary=back'
+      expect_err = 'This face does not exist in a 2D domain'
+      detail = 'on a face beyond the domain dimension,'
+    []
+    [duplicate]
+      type = RunException
+      input = neumann_linear.i
+      cli_args = 'TensorComputes/BCs/right/boundary=left'
+      expect_err = "both act on buffer 'u' on the same face"
+      detail = 'when two boundary conditions act on the same buffer and face,'
+    []
+    [unused]
+      type = RunException
+      input = neumann_linear.i
+      cli_args = 'TensorComputes/BCs/extra/type=TensorDirichletBC TensorComputes/BCs/extra/variable=u_exact TensorComputes/BCs/extra/boundary=left'
+      expect_err = "is not read with ghost layers by any compute"
+      detail = 'on a buffer that is not read with ghost layers,'
+    []
+    [not_a_bc]
+      type = RunException
+      input = neumann_linear.i
+      cli_args = 'TensorComputes/BCs/extra/type=ConstantTensor TensorComputes/BCs/extra/buffer=extra'
+      expect_err = "in \[TensorComputes/BCs\] is not a boundary condition"
+      detail = 'when the object is not a boundary condition,'
+    []
+    [robin_zero_denominator]
+      type = RunException
+      input = robin_steady_state.i
+      cli_args = 'TensorComputes/BCs/right/a=-40' # a/2 + b/dx = -20 + 1/0.05
+      expect_err = 'a/2 \+ b/dx must be nonzero'
+      detail = 'and when the Robin ghost-value denominator a/2 + b/dx is zero.'
+    []
+  []
 []

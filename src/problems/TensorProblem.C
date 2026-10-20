@@ -99,6 +99,9 @@ TensorProblem::init()
   for (auto & cmp : _computes)
     cmp->init();
 
+  if (_domain.isRealSpaceMode())
+    checkBoundaryConditions();
+
   // update dependencies
   if (_solver)
     _solver->updateDependencies();
@@ -564,7 +567,23 @@ TensorProblem::addTensorComputeBC(const std::string & compute_name,
                                   const std::string & name,
                                   InputParameters & parameters)
 {
-  addTensorCompute(compute_name, name, parameters, _bcs);
+  TensorComputeList created;
+  addTensorCompute(compute_name, name, parameters, created);
+  const auto bc = std::dynamic_pointer_cast<TensorBoundaryCondition>(created.front());
+  if (!bc)
+    mooseError(
+        "'", name, "' (", compute_name, ") in [TensorComputes/BCs] is not a boundary condition.");
+
+  const std::pair<std::string, unsigned int> key{bc->getVariableName(),
+                                                 static_cast<unsigned int>(bc->getFace())};
+  if (!_bcs.emplace(key, bc).second)
+    mooseError("Boundary conditions '",
+               _bcs[key]->name(),
+               "' and '",
+               name,
+               "' both act on buffer '",
+               key.first,
+               "' on the same face.");
 }
 
 void
@@ -584,19 +603,6 @@ TensorProblem::addTensorCompute(const std::string & compute_type,
   list.push_back(compute_object);
 }
 
-TensorBoundaryCondition *
-TensorProblem::getBoundaryConditionFor(const std::string & buffer_name, unsigned int face) const
-{
-  for (const auto & bc_base : _bcs)
-  {
-    const auto bc = std::dynamic_pointer_cast<TensorBoundaryCondition>(bc_base);
-    if (bc && bc->getVariableName() == buffer_name &&
-        static_cast<unsigned int>(bc->getFace()) == face && bc->ownsFace())
-      return bc.get();
-  }
-  return nullptr;
-}
-
 void
 TensorProblem::addTensorOutput(const std::string & output_type,
                                const std::string & output_name,
@@ -613,6 +619,29 @@ TensorProblem::addTensorOutput(const std::string & output_type,
 }
 
 void
+TensorProblem::checkBoundaryConditions() const
+{
+  const auto & periodic = _domain.getPeriodicDirections();
+  for (const auto & [buffer_name, ghost_layers] : _buffer_ghost_layers)
+    for (const auto d : make_range(_dim))
+      for (const auto face : {2 * d, 2 * d + 1})
+        if (ghost_layers > 0 && !periodic[d] && !_bcs.count({buffer_name, face}))
+          mooseError("Buffer '",
+                     buffer_name,
+                     "' is read with ghost layers but has no boundary condition on the ",
+                     TensorBoundaryCondition::faceName(face),
+                     " face. Add one under [TensorComputes/BCs].");
+
+  for (const auto & [key, bc] : _bcs)
+    if (!_buffer_ghost_layers.count(key.first) || _buffer_ghost_layers.at(key.first) == 0)
+      bc->paramError("variable",
+                     "Buffer '",
+                     key.first,
+                     "' is not read with ghost layers by any compute, so this boundary "
+                     "condition has no effect.");
+}
+
+void
 TensorProblem::fillBoundaryGhosts(const std::string & buffer_name,
                                   torch::Tensor & tensor,
                                   unsigned int d,
@@ -621,18 +650,10 @@ TensorProblem::fillBoundaryGhosts(const std::string & buffer_name,
                                   int64_t halo,
                                   int64_t owned_extent)
 {
-  const unsigned int face = 2 * d + (lower ? 0u : 1u);
-  auto * bc = getBoundaryConditionFor(buffer_name, face);
-  if (!bc)
-    mooseError("No boundary condition registered for field '",
-               buffer_name,
-               "' on the non-periodic ",
-               (lower ? "lower" : "upper"),
-               " face of direction ",
-               d,
-               ". REAL_SPACE mode with periodic_directions not covering this axis requires a "
-               "[TensorComputes][BCs] block for every field that requests ghost layers on it.");
-  bc->fillGhostCells(tensor, ghost_layers, halo, owned_extent, _domain.getGridSpacing()(d));
+  const auto it = _bcs.find({buffer_name, 2 * d + (lower ? 0u : 1u)});
+  if (it == _bcs.end())
+    mooseError("No boundary condition for buffer '", buffer_name, "' on a non-periodic face.");
+  it->second->fillGhostCells(tensor, ghost_layers, halo, owned_extent, _domain.getGridSpacing()(d));
 }
 
 void

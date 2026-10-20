@@ -148,17 +148,6 @@ public:
   typedef std::vector<std::shared_ptr<TensorOutput>> TensorOutputList;
   const TensorOutputList & getOutputs() const { return _outputs; }
 
-  const TensorComputeList & getBoundaryConditions() const { return _bcs; }
-
-  /**
-   * Look up the boundary condition registered for `buffer_name` on `face`
-   * (TensorBoundaryCondition::Face, as an unsigned int) that this rank
-   * should use to fill ghost cells. Returns nullptr if no BC is registered
-   * for that (field, face) pair.
-   */
-  TensorBoundaryCondition * getBoundaryConditionFor(const std::string & buffer_name,
-                                                    unsigned int face) const;
-
   template <typename T>
   const T & getConstant(const std::string & name);
 
@@ -204,11 +193,12 @@ protected:
   template <typename T = torch::Tensor>
   TensorBuffer<T> & getBufferHelper(const std::string & buffer_name, unsigned int ghost_layers = 0);
 
+  /// check that every buffer read with ghost layers has a boundary condition on each
+  /// non-periodic face, and that every boundary condition acts on such a buffer
+  void checkBoundaryConditions() const;
+
   /// fill ghost cells for buffer_name on a non-periodic physical domain face
-  /// (direction d, lower or upper side) from the registered boundary
-  /// condition; mooseErrors if none is registered. Called from
-  /// exchangeGhostLayers() in place of the no-op that previously left these
-  /// ghosts stale.
+  /// (direction d, lower or upper side) from its boundary condition
   void fillBoundaryGhosts(const std::string & buffer_name,
                           torch::Tensor & tensor,
                           unsigned int d,
@@ -263,9 +253,8 @@ protected:
   /// on demand objects that are explicitly triggered by other objects
   TensorComputeList _on_demand;
 
-  /// boundary condition objects for non-periodic real-space domain faces
-  /// (looked up by variable+face in getBoundaryConditionFor)
-  TensorComputeList _bcs;
+  /// boundary conditions on non-periodic real-space domain faces, by (buffer, face)
+  std::map<std::pair<std::string, unsigned int>, std::shared_ptr<TensorBoundaryCondition>> _bcs;
 
   ///  time integrator objects
   std::vector<std::shared_ptr<TensorTimeIntegrator<>>> _time_integrators;
