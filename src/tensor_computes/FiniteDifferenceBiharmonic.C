@@ -48,40 +48,33 @@ FiniteDifferenceBiharmonic::realSpaceComputeBuffer()
 void
 FiniteDifferenceBiharmonic::computeBuffer()
 {
-  const int radius = 2 * _laplacian_radius;
-  if (!_kernel.defined())
+  // convolution kernel from the stencil, offset o at kernel index o + radius
+  const int64_t radius = 2 * _laplacian_radius;
+  const int64_t ksize = 2 * radius + 1;
+  std::vector<int64_t> kernel_shape{1, 1};
+  kernel_shape.insert(kernel_shape.end(), _dim, ksize);
+  auto kernel = torch::zeros(kernel_shape, torch::TensorOptions().dtype(torch::kFloat64));
+  auto flat = kernel.view({-1});
+  for (const auto & entry : stencilAt())
   {
-    // convolution kernel from the stencil (offset o at kernel index o + radius),
-    // built once on the host; the stencil is constant
-    const int64_t ksize = 2 * radius + 1;
-    std::vector<int64_t> kernel_shape{1, 1};
-    kernel_shape.insert(kernel_shape.end(), _dim, ksize);
-    auto kernel = torch::zeros(kernel_shape, torch::TensorOptions().dtype(torch::kFloat64));
-    auto flat = kernel.view({-1});
-    for (const auto & entry : stencilAt())
-    {
-      int64_t index = 0;
-      for (const auto d : make_range(_dim))
-        index = index * ksize + entry.offset[d] + radius;
-      flat[index] = entry.coefficient;
-    }
-    _kernel = kernel.to(_u_in.options());
+    int64_t index = 0;
+    for (const auto d : make_range(_dim))
+      index = index * ksize + entry.offset[d] + radius;
+    flat[index] = entry.coefficient;
   }
 
   std::vector<int64_t> input_view{1, 1};
   input_view.insert(input_view.end(), _u_in.sizes().begin(), _u_in.sizes().end());
-  const auto input = _u_in.view(input_view);
-
-  torch::Tensor result;
-  if (_dim == 1)
-    result = torch::nn::functional::conv1d(
-        input, _kernel, torch::nn::functional::Conv1dFuncOptions().padding(radius));
-  else if (_dim == 2)
-    result = torch::nn::functional::conv2d(
-        input, _kernel, torch::nn::functional::Conv2dFuncOptions().padding(radius));
-  else
-    result = torch::nn::functional::conv3d(
-        input, _kernel, torch::nn::functional::Conv3dFuncOptions().padding(radius));
+  // conv1d/2d/3d by dimension of the kernel
+  const auto result = at::convolution(_u_in.view(input_view),
+                                      kernel.to(_u_in.options()),
+                                      {},
+                                      std::vector<int64_t>(_dim, 1),
+                                      std::vector<int64_t>(_dim, radius),
+                                      std::vector<int64_t>(_dim, 1),
+                                      false,
+                                      std::vector<int64_t>(_dim, 0),
+                                      1);
   _u.copy_(result.view(_u.sizes()));
 }
 

@@ -45,6 +45,4 @@ protected:
   const torch::Tensor & _u_in;
   /// prefactor
   const Real _factor;
-  /// convolution kernel, built on first use
-  torch::Tensor _kernel;
 };

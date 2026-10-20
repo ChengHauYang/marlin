@@ -264,6 +264,7 @@
       cli_args = 'TensorSolver/linear_solver=PETSC Outputs/file_base=biharmonic_mode_3pt'
       csvdiff = biharmonic_mode_3pt.csv
       abs_zero = 1e-8
+      prereq = 'biharmonic/3pt_torch'
       compute_devices = 'cuda'
       min_slots = 2 # memory heavy
       capabilities = 'cuda'
@@ -340,6 +341,28 @@
       expect_out = 'Time Step 10,.*KSP Object: \(u_mg_levels_1_\).*maximum iterations=3'
       compute_devices = 'cpu'
       detail = 'for the multigrid levels, still applied in the last time step.'
+    []
+  []
+
+  [smoother]
+    requirement = 'The system shall smooth every multigrid level of the PETSc solve by damped Jacobi with the weight 4/(3 rho), rho the Gershgorin bound of the level operator, '
+    [weight]
+      type = RunApp
+      input = biharmonic_mode.i
+      # fine level: 1/dt = 100 and the 13-point stencil of Mkappa = 1e-3 at h = 1/32
+      # give rho = 1 + 44 Mkappa / h^4 / (100 + 20 Mkappa / h^4), omega = 0.418031
+      cli_args = 'TensorSolver/linear_solver=PETSC Outputs/csv=false -u_ksp_view'
+      expect_out = 'KSP Object: \(u_mg_levels_2_\)[^\n]*\n\s+type: richardson\n\s+damping factor=0.418031'
+      compute_devices = 'cpu'
+      detail = 'by default, and'
+    []
+    [user_weight]
+      type = RunApp
+      input = biharmonic_mode.i
+      cli_args = 'TensorSolver/linear_solver=PETSC Outputs/csv=false -u_mg_levels_ksp_richardson_scale 0.3 -u_ksp_view'
+      expect_out = 'Time Step 10,.*KSP Object: \(u_mg_levels_2_\)[^\n]*\n\s+type: richardson\n\s+damping factor=0.3\n'
+      compute_devices = 'cpu'
+      detail = 'with a weight set on the command line instead, still applied in the last time step.'
     []
   []
 

@@ -110,11 +110,8 @@ protected:
   /// create the hierarchy, the level operators and the KSP of a field
   void setupPetsc(Field & field);
 
-  /// (re)assemble the coarse levels from the current stencil if it changed
+  /// (re)assemble the coarse levels and set the smoother weights if the stencil changed
   void assembleCoarseLevels(Field & field);
-
-  /// set the damped Jacobi weight of every level smoother from the level's stencil
-  void setSmootherWeights(Field & field);
 
   /// put the block's PETSc options (prefix <buffer>_) and the command line into the global database
   void insertPetscOptions(const Field & field);
