@@ -75,10 +75,8 @@ public:
    * Return this BC's contribution to the implicit (matrix-row / RHS) system
    * for the boundary-adjacent interior point, as a one-sided finite
    * difference stencil (same FDStencilEntry shape LinearFDOperator uses)
-   * plus a constant RHS contribution. Unused by any solver until a later
-   * PETSc PR, but implemented now and exercised by the required R4
-   * dual-path consistency test (same instance, fillGhostCells and
-   * stencilContribution must imply the same boundary value/flux).
+   * plus a constant RHS contribution. Not yet used by a solver; the unit
+   * test checks that it implies the same ghost value as fillGhostCells.
    */
   virtual std::pair<std::vector<FDStencilEntry>, Real>
   stencilContribution(unsigned int ghost_layers, Real dx) const = 0;

@@ -10,18 +10,16 @@
 #include "MarlinUtils.h"
 #include "gtest/gtest.h"
 
-// R4 dual-path consistency test (required, not optional -- see the FD+PETSc
-// roadmap, PR1): fillGhostCellsStatic() (the explicit/matrix-free path) and
-// stencilContributionStatic() (the future implicit path) must, for the SAME
-// (a, b, c, dx), imply the SAME boundary value/flux. Both are called here as
-// the actual production static core TensorRobinBC::fillGhostCells() and
-// TensorRobinBC::stencilContribution() delegate to -- not a re-derivation of
-// the formula -- so a sign or algebra regression in either path is caught.
+// fillGhostCellsStatic() (the explicit/matrix-free path) and
+// stencilContributionStatic() (the implicit path) must, for the same (a, b, c, dx),
+// imply the same ghost value, and that ghost value must satisfy the Robin condition
+// itself. The second check is independent of the shared ghostCoefficientOnU0() /
+// ghostConstantTerm() helpers, so a sign error in them is caught.
 namespace
 {
-// Checks fillGhostCellsStatic() and stencilContributionStatic() agree, for one
-// Robin triple (a, b, c), on both the lower and upper face of a small 1D
-// interior field.
+// Checks fillGhostCellsStatic() and stencilContributionStatic() agree, and satisfy
+// the BC, for one Robin triple (a, b, c), on both the lower and upper face of a small
+// 1D interior field.
 void
 checkDualPath(Real a, Real b, Real c, Real dx)
 {
@@ -53,6 +51,13 @@ checkDualPath(Real a, Real b, Real c, Real dx)
     const Real tolerance =
         MooseTensor::floatTensorOptions().dtype() == torch::kFloat64 ? 1e-12 : 1e-6;
     EXPECT_NEAR(ghost_value, predicted_ghost_value, tolerance)
+        << "a=" << a << " b=" << b << " c=" << c << " dx=" << dx
+        << " is_upper_face=" << is_upper_face;
+
+    // the ghost satisfies a*u + b*du/dn = c at the face: u = (u0 + ughost)/2 and,
+    // since the ghost lies on the outward side of either face, du/dn = (ughost - u0)/dx
+    const Real bc_residual = a * (u0 + ghost_value) / 2.0 + b * (ghost_value - u0) / dx - c;
+    EXPECT_NEAR(bc_residual, 0.0, tolerance * (std::abs(a) / 2.0 + std::abs(b) / dx))
         << "a=" << a << " b=" << b << " c=" << c << " dx=" << dx
         << " is_upper_face=" << is_upper_face;
   }
