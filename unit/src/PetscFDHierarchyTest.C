@@ -19,9 +19,9 @@
 namespace
 {
 /**
- * A uniform partition of n cells per axis over the ranks of MPI_COMM_WORLD (the
- * same shape for every rank count used in these tests: 1, 2 or 4 ranks, split
- * along Marlin axis 0 first, then axis 1).
+ * A partition of n cells per axis over the ranks of MPI_COMM_WORLD: 4 ranks split
+ * Marlin axes 0 and 1 in two, any other count splits axis 0. Slab sizes follow
+ * DomainAction::partitionHepler (32 cells on 3 ranks: 10, 11, 11).
  */
 PetscFD::Partition
 uniformPartition(unsigned int dim, int64_t n)
@@ -42,7 +42,13 @@ uniformPartition(unsigned int dim, int64_t n)
   for (const auto d : make_range(3))
   {
     p.n[d] = d < dim ? n : 1;
-    p.counts[d].assign(p.parts[d], PetscInt(p.n[d] / p.parts[d]));
+    p.counts[d].clear();
+    int64_t assigned = 0;
+    for (const auto i : make_range(p.parts[d]))
+    {
+      p.counts[d].push_back(PetscInt((p.n[d] - assigned) / (p.parts[d] - i)));
+      assigned += p.counts[d].back();
+    }
   }
   return p;
 }

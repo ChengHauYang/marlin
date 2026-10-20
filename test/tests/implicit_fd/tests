@@ -180,7 +180,7 @@
     [3pt]
       type = CSVDiff
       input = poisson_mms.i
-      # 32 cells over 3 ranks (11, 11, 10): uneven slabs on every multigrid level
+      # 32 cells over 3 ranks (10, 11, 11): uneven slabs on every multigrid level
       cli_args = 'TensorSolver/linear_solver=PETSC Outputs/file_base=poisson_mms_3pt'
       csvdiff = poisson_mms_3pt.csv
       prereq = 'poisson_petsc/3pt'
