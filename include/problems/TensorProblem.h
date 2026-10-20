@@ -33,6 +33,7 @@
 
 class UniformTensorMesh;
 class TensorOperatorBase;
+class TensorBoundaryCondition;
 template <typename T = torch::Tensor>
 class TensorTimeIntegrator;
 class TensorOutput;
@@ -94,6 +95,9 @@ public:
   virtual void addTensorComputePostprocess(const std::string & compute_name,
                                            const std::string & name,
                                            InputParameters & parameters);
+  virtual void addTensorComputeBC(const std::string & compute_name,
+                                  const std::string & name,
+                                  InputParameters & parameters);
 
   virtual void addTensorOutput(const std::string & output_name,
                                const std::string & name,
@@ -189,6 +193,20 @@ protected:
   template <typename T = torch::Tensor>
   TensorBuffer<T> & getBufferHelper(const std::string & buffer_name, unsigned int ghost_layers = 0);
 
+  /// check that every buffer read with ghost layers has a boundary condition on each
+  /// non-periodic face, and that every boundary condition acts on such a buffer
+  void checkBoundaryConditions() const;
+
+  /// fill ghost cells for buffer_name on a non-periodic physical domain face
+  /// (direction d, lower or upper side) from its boundary condition
+  void fillBoundaryGhosts(const std::string & buffer_name,
+                          torch::Tensor & tensor,
+                          unsigned int d,
+                          bool lower,
+                          unsigned int ghost_layers,
+                          int64_t halo,
+                          int64_t owned_extent);
+
   /// tensor options
   const torch::TensorOptions _options;
 
@@ -234,6 +252,9 @@ protected:
 
   /// on demand objects that are explicitly triggered by other objects
   TensorComputeList _on_demand;
+
+  /// boundary conditions on non-periodic real-space domain faces, by (buffer, face)
+  std::map<std::pair<std::string, unsigned int>, std::shared_ptr<TensorBoundaryCondition>> _bcs;
 
   ///  time integrator objects
   std::vector<std::shared_ptr<TensorTimeIntegrator<>>> _time_integrators;

@@ -13,6 +13,7 @@
 #include "UniformTensorMesh.h"
 
 #include "TensorOperatorBase.h"
+#include "TensorBoundaryCondition.h"
 #include "TensorTimeIntegrator.h"
 #include "TensorOutput.h"
 #include "DomainAction.h"
@@ -97,6 +98,9 @@ TensorProblem::init()
   // init computes (must happen before dependency update)
   for (auto & cmp : _computes)
     cmp->init();
+
+  if (_domain.isRealSpaceMode())
+    checkBoundaryConditions();
 
   // update dependencies
   if (_solver)
@@ -188,10 +192,8 @@ TensorProblem::execute(const ExecFlagType & exec_type)
   }
 
   if (exec_type == EXEC_TIMESTEP_END)
-  {
     // run outputs
     executeTensorOutputs(EXEC_TIMESTEP_END);
-  }
 
   FEProblem::execute(exec_type);
 }
@@ -561,6 +563,30 @@ TensorProblem::addTensorComputePostprocess(const std::string & compute_name,
 }
 
 void
+TensorProblem::addTensorComputeBC(const std::string & compute_name,
+                                  const std::string & name,
+                                  InputParameters & parameters)
+{
+  TensorComputeList created;
+  addTensorCompute(compute_name, name, parameters, created);
+  const auto bc = std::dynamic_pointer_cast<TensorBoundaryCondition>(created.front());
+  if (!bc)
+    mooseError(
+        "'", name, "' (", compute_name, ") in [TensorComputes/BCs] is not a boundary condition.");
+
+  const std::pair<std::string, unsigned int> key{bc->getVariableName(),
+                                                 static_cast<unsigned int>(bc->getFace())};
+  if (!_bcs.emplace(key, bc).second)
+    mooseError("Boundary conditions '",
+               _bcs[key]->name(),
+               "' and '",
+               name,
+               "' both act on buffer '",
+               key.first,
+               "' on the same face.");
+}
+
+void
 TensorProblem::addTensorCompute(const std::string & compute_type,
                                 const std::string & compute_name,
                                 InputParameters & parameters,
@@ -590,6 +616,44 @@ TensorProblem::addTensorOutput(const std::string & output_type,
   auto output_object = _factory.create<TensorOutput>(output_type, output_name, parameters, 0);
   logAdd("TensorOutput", output_name, output_type, parameters);
   _outputs.push_back(output_object);
+}
+
+void
+TensorProblem::checkBoundaryConditions() const
+{
+  const auto & periodic = _domain.getPeriodicDirections();
+  for (const auto & [buffer_name, ghost_layers] : _buffer_ghost_layers)
+    for (const auto d : make_range(_dim))
+      for (const auto face : {2 * d, 2 * d + 1})
+        if (ghost_layers > 0 && !periodic[d] && !_bcs.count({buffer_name, face}))
+          mooseError("Buffer '",
+                     buffer_name,
+                     "' is read with ghost layers but has no boundary condition on the ",
+                     TensorBoundaryCondition::faceName(face),
+                     " face. Add one under [TensorComputes/BCs].");
+
+  for (const auto & [key, bc] : _bcs)
+    if (!_buffer_ghost_layers.count(key.first) || _buffer_ghost_layers.at(key.first) == 0)
+      bc->paramError("variable",
+                     "Buffer '",
+                     key.first,
+                     "' is not read with ghost layers by any compute, so this boundary "
+                     "condition has no effect.");
+}
+
+void
+TensorProblem::fillBoundaryGhosts(const std::string & buffer_name,
+                                  torch::Tensor & tensor,
+                                  unsigned int d,
+                                  bool lower,
+                                  unsigned int ghost_layers,
+                                  int64_t halo,
+                                  int64_t owned_extent)
+{
+  const auto it = _bcs.find({buffer_name, 2 * d + (lower ? 0u : 1u)});
+  if (it == _bcs.end())
+    mooseError("No boundary condition for buffer '", buffer_name, "' on a non-periodic face.");
+  it->second->fillGhostCells(tensor, ghost_layers, halo, owned_extent, _domain.getGridSpacing()(d));
 }
 
 void
@@ -644,13 +708,21 @@ TensorProblem::exchangeGhostLayers(const std::string & buffer_name, unsigned int
     const unsigned int part = partitions[d];
     if (part == 1)
     {
-      if (periodic[d] && halo >= static_cast<int64_t>(ghost_layers))
+      if (periodic[d])
       {
-        const auto owned_width = owned[d];
-        auto wrap_upper = tensor.narrow(d, halo, ghost_layers);
-        auto wrap_lower = tensor.narrow(d, halo + owned_width - ghost_layers, ghost_layers);
-        tensor.narrow(d, halo - ghost_layers, ghost_layers).copy_(wrap_lower);
-        tensor.narrow(d, halo + owned_width, ghost_layers).copy_(wrap_upper);
+        if (halo >= static_cast<int64_t>(ghost_layers))
+        {
+          const auto owned_width = owned[d];
+          auto wrap_upper = tensor.narrow(d, halo, ghost_layers);
+          auto wrap_lower = tensor.narrow(d, halo + owned_width - ghost_layers, ghost_layers);
+          tensor.narrow(d, halo - ghost_layers, ghost_layers).copy_(wrap_lower);
+          tensor.narrow(d, halo + owned_width, ghost_layers).copy_(wrap_upper);
+        }
+      }
+      else
+      {
+        fillBoundaryGhosts(buffer_name, tensor, d, /*lower=*/true, ghost_layers, halo, owned[d]);
+        fillBoundaryGhosts(buffer_name, tensor, d, /*lower=*/false, ghost_layers, halo, owned[d]);
       }
       continue;
     }
@@ -682,7 +754,10 @@ TensorProblem::exchangeGhostLayers(const std::string & buffer_name, unsigned int
         else if (periodic[d])
           neighbor[d] = part - 1;
         else
+        {
+          fillBoundaryGhosts(buffer_name, tensor, d, /*lower=*/true, ghost_layers, halo, owned[d]);
           return;
+        }
       }
       else
       {
@@ -691,7 +766,10 @@ TensorProblem::exchangeGhostLayers(const std::string & buffer_name, unsigned int
         else if (periodic[d])
           neighbor[d] = 0;
         else
+        {
+          fillBoundaryGhosts(buffer_name, tensor, d, /*lower=*/false, ghost_layers, halo, owned[d]);
           return;
+        }
       }
 
       const int neighbor_rank = toRank(neighbor[0], neighbor[1], neighbor[2]);

@@ -53,6 +53,13 @@ LatticeBoltzmannProblem::LatticeBoltzmannProblem(const InputParameters & paramet
     _log_interval(getParam<unsigned int>("log_interval")),
     _tolerance(getParam<Real>("tolerance"))
 {
+  // LBM handles non-periodic domain faces with its own [TensorComputes/Boundary] objects
+  if (_domain.isRealSpaceMode())
+    for (const auto d : make_range(_domain.getDim()))
+      if (!_domain.getPeriodicDirections()[d])
+        mooseError("LatticeBoltzmannProblem requires every direction to be periodic with "
+                   "`parallel_mode = REAL_SPACE`.");
+
   if (_domain.comm().size() > 1)
     _ghost_radius = 1;
 

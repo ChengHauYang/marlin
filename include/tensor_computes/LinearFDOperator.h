@@ -30,9 +30,6 @@ struct FDStencilEntry
  * TensorOperatorBase subclass; it is multiply-inherited alongside
  * TensorOperator<T> by operators that can expose their stencil for uses
  * beyond matrix-free evaluation (e.g. assembling a preconditioner matrix).
- *
- * See doc/roadmap/marlin_fd_petsc_roadmap for the development roadmap this
- * interface is part of.
  */
 class LinearFDOperator
 {
