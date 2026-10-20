@@ -82,12 +82,14 @@ TensorRobinBC::fillGhostCellsStatic(torch::Tensor & buffer,
 
   if (ghost_layers >= 2)
   {
-    // second ghost row: linear extrapolation from u0 and the first ghost
-    // value, exact for a linear field (consistent with the 5-point
-    // stencil's higher accuracy requirement near the boundary).
+    // second ghost row: the same Robin relation on the pair (u1, ghost2), which is also
+    // centred on the face but 3*dx apart. Exact for linear fields; the even mirror
+    // ghost2 = u1 for zero flux and the odd mirror ghost2 = 2c - u1 for Dirichlet.
+    const auto u1 = is_upper_face ? buffer.narrow(face_dim, halo + owned_extent - 2, 1)
+                                  : buffer.narrow(face_dim, halo + 1, 1);
     auto ghost2 = is_upper_face ? buffer.narrow(face_dim, halo + owned_extent + 1, 1)
                                 : buffer.narrow(face_dim, halo - 2, 1);
-    ghost2.copy_(2.0 * ghost1 - u0);
+    ghost2.copy_(ghostCoefficientOnU0(a, b, 3.0 * dx) * u1 + ghostConstantTerm(a, b, c, 3.0 * dx));
   }
 }
 

@@ -107,6 +107,15 @@
       compute_devices = 'cpu cuda mps xpu'
       detail = 'and conserve the total integral of a field under zero-flux boundary conditions on all non-periodic faces, from a non-uniform initial condition.'
     []
+    [conservation_5pt]
+      type = CSVDiff
+      input = neumann_conservation.i
+      csvdiff = neumann_conservation_5pt_out.csv
+      # the 5-point stencil's explicit limit is 3/4 of the 3-point one, below the 1e-3 substep
+      cli_args = 'TensorComputes/Solve/dt/stencil_width=5 TensorSolver/substeps=2000 Outputs/file_base=neumann_conservation_5pt_out'
+      compute_devices = 'cpu cuda mps xpu'
+      detail = 'and conserve it with the 5-point Laplacian, which reads two ghost layers.'
+    []
     [linear]
       type = CSVDiff
       input = neumann_linear.i

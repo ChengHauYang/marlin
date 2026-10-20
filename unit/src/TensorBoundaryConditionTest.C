@@ -62,6 +62,33 @@ checkDualPath(Real a, Real b, Real c, Real dx)
         << " is_upper_face=" << is_upper_face;
   }
 }
+
+// Checks that the second ghost layer satisfies the Robin condition on the pair (u1, ghost2),
+// which is centred on the face and 3*dx apart, on both faces.
+void
+checkSecondGhostLayer(Real a, Real b, Real c, Real dx)
+{
+  const int64_t halo = 2;
+  const int64_t owned_extent = 4;
+  const Real u1 = 0.9; // second cell in from either face
+  const Real tolerance =
+      MooseTensor::floatTensorOptions().dtype() == torch::kFloat64 ? 1e-12 : 1e-6;
+
+  for (const bool is_upper_face : {false, true})
+  {
+    auto buffer = torch::zeros({owned_extent + 2 * halo}, MooseTensor::floatTensorOptions());
+    buffer[is_upper_face ? halo + owned_extent - 2 : halo + 1] = u1;
+
+    TensorRobinBC::fillGhostCellsStatic(
+        buffer, is_upper_face, /*face_dim=*/0, /*ghost_layers=*/2, halo, owned_extent, a, b, c, dx);
+
+    const auto ghost2 = buffer[is_upper_face ? halo + owned_extent + 1 : halo - 2].item<double>();
+    const Real bc_residual = a * (u1 + ghost2) / 2.0 + b * (ghost2 - u1) / (3.0 * dx) - c;
+    EXPECT_NEAR(bc_residual, 0.0, tolerance * (std::abs(a) / 2.0 + std::abs(b) / dx))
+        << "a=" << a << " b=" << b << " c=" << c << " dx=" << dx
+        << " is_upper_face=" << is_upper_face;
+  }
+}
 }
 
 TEST(TensorBoundaryConditionTest, DirichletDualPath)
@@ -79,4 +106,11 @@ TEST(TensorBoundaryConditionTest, NeumannDualPath)
 TEST(TensorBoundaryConditionTest, GeneralRobinDualPath)
 {
   checkDualPath(/*a=*/2.0, /*b=*/3.0, /*c=*/1.25, /*dx=*/0.05);
+}
+
+TEST(TensorBoundaryConditionTest, SecondGhostLayer)
+{
+  checkSecondGhostLayer(/*a=*/1.0, /*b=*/0.0, /*c=*/3.5, /*dx=*/0.1);
+  checkSecondGhostLayer(/*a=*/0.0, /*b=*/1.0, /*c=*/-2.0, /*dx=*/0.1);
+  checkSecondGhostLayer(/*a=*/2.0, /*b=*/3.0, /*c=*/1.25, /*dx=*/0.05);
 }
