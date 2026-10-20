@@ -302,7 +302,7 @@ ImplicitFDSolver::substep()
                    " Use the TensorSolveIterationAdaptiveDT time stepper (with substeps = 1) to "
                    "retry the step with a smaller dt.");
 
-      _console << result.failure << '\n';
+      _console << result.failure << std::endl;
       // retry from the previous state of every field solved so far
       for (const auto i : index_range(u_old))
         _fields[i]._u = u_old[i];
