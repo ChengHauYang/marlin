@@ -256,7 +256,7 @@
       abs_zero = 1e-8
       prereq = 'biharmonic/5pt_torch'
       compute_devices = 'cpu'
-      detail = 'with the composed 5-point stencil and the PETSc multigrid solver, and'
+      detail = 'with the composed 5-point stencil and the PETSc multigrid solver,'
     []
     [3pt_petsc_cuda]
       type = CSVDiff
@@ -268,7 +268,59 @@
       compute_devices = 'cuda'
       min_slots = 2 # memory heavy
       capabilities = 'cuda'
-      detail = 'with the composed 3-point stencil and the PETSc multigrid solver on CUDA.'
+      detail = 'with the composed 3-point stencil and the PETSc multigrid solver on CUDA,'
+    []
+    [3d_3pt_torch]
+      type = CSVDiff
+      input = biharmonic_mode3d.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG Outputs/file_base=biharmonic_mode_3d_3pt'
+      csvdiff = biharmonic_mode_3d_3pt.csv
+      abs_zero = 1e-8
+      compute_devices = 'cpu cuda'
+      min_slots = 2 # memory heavy
+      detail = 'in 3D with the composed 3-point stencil and the torch preconditioned conjugate gradient solver,'
+    []
+    [3d_5pt_torch]
+      type = CSVDiff
+      input = biharmonic_mode3d.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG stencil=5 Outputs/file_base=biharmonic_mode_3d_5pt'
+      csvdiff = biharmonic_mode_3d_5pt.csv
+      abs_zero = 1e-8
+      compute_devices = 'cpu cuda'
+      min_slots = 2 # memory heavy
+      detail = 'in 3D with the composed 5-point stencil and the torch preconditioned conjugate gradient solver,'
+    []
+    [3d_3pt_petsc]
+      type = CSVDiff
+      input = biharmonic_mode3d.i
+      cli_args = 'TensorSolver/linear_solver=PETSC Outputs/file_base=biharmonic_mode_3d_3pt'
+      csvdiff = biharmonic_mode_3d_3pt.csv
+      abs_zero = 1e-8
+      prereq = 'biharmonic/3d_3pt_torch'
+      compute_devices = 'cpu'
+      detail = 'in 3D with the composed 3-point stencil and the PETSc multigrid solver,'
+    []
+    [3d_5pt_petsc]
+      type = CSVDiff
+      input = biharmonic_mode3d.i
+      cli_args = 'TensorSolver/linear_solver=PETSC stencil=5 Outputs/file_base=biharmonic_mode_3d_5pt'
+      csvdiff = biharmonic_mode_3d_5pt.csv
+      abs_zero = 1e-8
+      prereq = 'biharmonic/3d_5pt_torch'
+      compute_devices = 'cpu'
+      detail = 'in 3D with the composed 5-point stencil and the PETSc multigrid solver, and'
+    []
+    [3d_5pt_petsc_cuda]
+      type = CSVDiff
+      input = biharmonic_mode3d.i
+      cli_args = 'TensorSolver/linear_solver=PETSC stencil=5 Outputs/file_base=biharmonic_mode_3d_5pt'
+      csvdiff = biharmonic_mode_3d_5pt.csv
+      abs_zero = 1e-8
+      prereq = 'biharmonic/3d_5pt_torch'
+      compute_devices = 'cuda'
+      min_slots = 2 # memory heavy
+      capabilities = 'cuda'
+      detail = 'in 3D with the composed 5-point stencil and the PETSc multigrid solver on CUDA.'
     []
   []
 
