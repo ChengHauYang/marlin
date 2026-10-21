@@ -536,10 +536,10 @@ ImplicitFDSolver::setupPetsc(Field & field)
   if (field._singular)
     PetscCallAbort(comm, MatNullSpaceCreate(comm, PETSC_TRUE, 0, nullptr, &ps.nullspace));
 
-  // coarse levels: rediscretised and assembled
+  // coarse levels: rediscretised and assembled, with the fine stencil's offsets
   ps.coarse.resize(levels - 1);
   for (const auto l : index_range(ps.coarse))
-    PetscCallAbort(comm, DMCreateMatrix(hierarchy.dms[l + 1], &ps.coarse[l]));
+    ps.coarse[l] = PetscFD::createStencilMatrix(hierarchy.dms[l + 1], stencil);
 
   if (field._singular)
   {
@@ -614,6 +614,16 @@ ImplicitFDSolver::setupPetsc(Field & field)
   assembleCoarseLevels(field);
 
   insertPetscOptions(field);
+  // PCMG would build new levels without the hierarchy above (and fail in PCSetUp)
+  PetscBool user_levels;
+  PetscCallAbort(comm,
+                 PetscOptionsHasName(
+                     nullptr, petscPrefix(field._name).c_str(), "-pc_mg_levels", &user_levels));
+  if (user_levels)
+    mooseError("-",
+               petscPrefix(field._name),
+               "pc_mg_levels is not supported: ImplicitFDSolver sets the number of multigrid "
+               "levels from the grid and the stencil width.");
   PetscCallAbort(comm, KSPSetFromOptions(ps.ksp));
 
   // b and x get the solver's tensors placed before every solve

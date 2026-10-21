@@ -397,7 +397,7 @@
   []
 
   [smoother]
-    requirement = 'The system shall smooth every multigrid level of the PETSc solve by damped Jacobi with the weight 4/(3 rho), rho the Gershgorin bound of the level operator, '
+    requirement = 'The system shall smooth every multigrid level of the PETSc solve but the coarsest (LU) by damped Jacobi with the weight 4/(3 rho), rho the Gershgorin bound of the level operator, '
     [weight]
       type = RunApp
       input = biharmonic_mode.i
@@ -480,7 +480,15 @@
       input = be_mode.i
       cli_args = 'TensorSolver/linear_solver=TORCH_PCG TensorComputes/Solve/lap/input=gold'
       expect_err = "acts on 'gold' rather than on the solved field 'u'"
-      detail = 'with an operator acting on a field other than the solved field, or'
+      detail = 'with an operator acting on a field other than the solved field,'
+    []
+    [mg_levels]
+      type = RunException
+      input = be_mode.i
+      cli_args = 'TensorSolver/linear_solver=PETSC -u_pc_mg_levels 2'
+      expect_err = '-u_pc_mg_levels is not supported'
+      compute_devices = 'cpu'
+      detail = 'with a multigrid level count from the PETSc options,'
     []
     [not_fd_operator]
       type = RunException
