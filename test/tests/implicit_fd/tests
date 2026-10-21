@@ -1,0 +1,350 @@
+[Tests]
+  design = 'ImplicitFDSolver.md TimeDerivativeOperator.md'
+  issues = '#184'
+
+  [backward_euler]
+    requirement = 'The system shall integrate a periodic Fourier mode with implicit backward Euler finite differences, reproducing the exact discrete amplification factor in every step, including after a time step change, using the torch preconditioned conjugate gradient solver'
+    [2d_3pt]
+      type = CSVDiff
+      input = be_mode.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG dt2=0.02 Outputs/file_base=be_mode_2d_3pt'
+      csvdiff = be_mode_2d_3pt.csv
+      compute_devices = 'cpu cuda'
+      min_slots = 2 # memory heavy
+      detail = 'in 2D with the 3-point stencil,'
+    []
+    [2d_5pt]
+      type = CSVDiff
+      input = be_mode.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG dt2=0.02 stencil=5 Outputs/file_base=be_mode_2d_5pt'
+      csvdiff = be_mode_2d_5pt.csv
+      compute_devices = 'cpu cuda'
+      min_slots = 2 # memory heavy
+      detail = 'in 2D with the 5-point stencil,'
+    []
+    [3d_3pt]
+      type = CSVDiff
+      input = be_mode3d.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG dt2=0.02 Outputs/file_base=be_mode_3d_3pt'
+      csvdiff = be_mode_3d_3pt.csv
+      compute_devices = 'cpu cuda'
+      min_slots = 2 # memory heavy
+      detail = 'in 3D with the 3-point stencil,'
+    []
+    [3d_5pt]
+      type = CSVDiff
+      input = be_mode3d.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG dt2=0.02 stencil=5 Outputs/file_base=be_mode_3d_5pt'
+      csvdiff = be_mode_3d_5pt.csv
+      compute_devices = 'cpu cuda'
+      min_slots = 2 # memory heavy
+      detail = 'in 3D with the 5-point stencil, and'
+    []
+    [2d_3pt_mps]
+      type = CSVDiff
+      input = be_mode.i
+      # MPS has no double precision: a single precision reachable tolerance
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG TensorSolver/l_tol=1e-5 dt2=0.02 Outputs/file_base=be_mode_2d_3pt'
+      csvdiff = be_mode_2d_3pt.csv
+      abs_zero = 1e-5
+      rel_err = 1e-5
+      compute_devices = 'mps'
+      detail = 'in 2D with the 3-point stencil in single precision on MPS.'
+    []
+  []
+
+  [backward_euler_petsc]
+    requirement = 'The system shall integrate a periodic Fourier mode with implicit backward Euler finite differences, reproducing the exact discrete amplification factor in every step, including after a time step change, using the PETSc conjugate gradient solver with geometric multigrid'
+    [2d_3pt]
+      type = CSVDiff
+      input = be_mode.i
+      cli_args = 'TensorSolver/linear_solver=PETSC dt2=0.02 Outputs/file_base=be_mode_2d_3pt'
+      csvdiff = be_mode_2d_3pt.csv
+      # max_error is the solve error, which PETSc and the torch gold leave at different
+      # levels below l_tol * max(u) = 1e-8 * 0.71
+      abs_zero = 1e-8
+      prereq = 'backward_euler/2d_3pt'
+      compute_devices = 'cpu'
+      detail = 'in 2D with the 3-point stencil,'
+    []
+    [2d_5pt]
+      type = CSVDiff
+      input = be_mode.i
+      cli_args = 'TensorSolver/linear_solver=PETSC dt2=0.02 stencil=5 Outputs/file_base=be_mode_2d_5pt'
+      csvdiff = be_mode_2d_5pt.csv
+      abs_zero = 1e-8
+      prereq = 'backward_euler/2d_5pt'
+      compute_devices = 'cpu'
+      detail = 'in 2D with the 5-point stencil,'
+    []
+    [3d_3pt]
+      type = CSVDiff
+      input = be_mode3d.i
+      cli_args = 'TensorSolver/linear_solver=PETSC dt2=0.02 Outputs/file_base=be_mode_3d_3pt'
+      csvdiff = be_mode_3d_3pt.csv
+      abs_zero = 1e-8
+      prereq = 'backward_euler/3d_3pt'
+      compute_devices = 'cpu'
+      detail = 'in 3D with the 3-point stencil,'
+    []
+    [3d_5pt]
+      type = CSVDiff
+      input = be_mode3d.i
+      cli_args = 'TensorSolver/linear_solver=PETSC dt2=0.02 stencil=5 Outputs/file_base=be_mode_3d_5pt'
+      csvdiff = be_mode_3d_5pt.csv
+      abs_zero = 1e-8
+      prereq = 'backward_euler/3d_5pt'
+      compute_devices = 'cpu'
+      detail = 'in 3D with the 5-point stencil, and'
+    []
+    [2d_3pt_cuda]
+      type = CSVDiff
+      input = be_mode.i
+      cli_args = 'TensorSolver/linear_solver=PETSC dt2=0.02 Outputs/file_base=be_mode_2d_3pt'
+      csvdiff = be_mode_2d_3pt.csv
+      abs_zero = 1e-8
+      compute_devices = 'cuda'
+      min_slots = 2 # memory heavy
+      capabilities = 'cuda'
+      detail = 'in 2D with the 3-point stencil on CUDA.'
+    []
+  []
+
+  [poisson]
+    requirement = 'The system shall solve the singular steady periodic Poisson problem with implicit finite differences and return the zero-mean solution, using the torch preconditioned conjugate gradient solver'
+    [3pt]
+      type = CSVDiff
+      input = poisson_mms.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG Outputs/file_base=poisson_mms_3pt'
+      csvdiff = poisson_mms_3pt.csv
+      compute_devices = 'cpu cuda'
+      min_slots = 2 # memory heavy
+      detail = 'with the second order 3-point stencil,'
+    []
+    [5pt]
+      type = CSVDiff
+      input = poisson_mms.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG TensorComputes/Solve/lap/stencil_width=5 Outputs/file_base=poisson_mms_5pt'
+      csvdiff = poisson_mms_5pt.csv
+      compute_devices = 'cpu cuda'
+      min_slots = 2 # memory heavy
+      detail = 'with the fourth order 5-point stencil, and'
+    []
+    [3pt_mps]
+      type = CSVDiff
+      input = poisson_mms.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG TensorSolver/l_tol=1e-5 Outputs/file_base=poisson_mms_3pt'
+      csvdiff = poisson_mms_3pt.csv
+      # single precision: the zero mean holds to round-off of the field magnitude
+      abs_zero = 1e-5
+      rel_err = 1e-4
+      compute_devices = 'mps'
+      detail = 'with the 3-point stencil in single precision on MPS.'
+    []
+  []
+
+  [poisson_petsc]
+    requirement = 'The system shall solve the singular steady periodic Poisson problem with implicit finite differences and return the zero-mean solution, using the PETSc conjugate gradient solver with geometric multigrid'
+    [3pt]
+      type = CSVDiff
+      input = poisson_mms.i
+      cli_args = 'TensorSolver/linear_solver=PETSC Outputs/file_base=poisson_mms_3pt'
+      csvdiff = poisson_mms_3pt.csv
+      prereq = 'poisson/3pt'
+      compute_devices = 'cpu'
+      detail = 'with the second order 3-point stencil,'
+    []
+    [5pt]
+      type = CSVDiff
+      input = poisson_mms.i
+      cli_args = 'TensorSolver/linear_solver=PETSC TensorComputes/Solve/lap/stencil_width=5 Outputs/file_base=poisson_mms_5pt'
+      csvdiff = poisson_mms_5pt.csv
+      prereq = 'poisson/5pt'
+      compute_devices = 'cpu'
+      detail = 'with the fourth order 5-point stencil, and'
+    []
+    [3pt_cuda]
+      type = CSVDiff
+      input = poisson_mms.i
+      cli_args = 'TensorSolver/linear_solver=PETSC Outputs/file_base=poisson_mms_3pt'
+      csvdiff = poisson_mms_3pt.csv
+      compute_devices = 'cuda'
+      min_slots = 2 # memory heavy
+      capabilities = 'cuda'
+      detail = 'with the 3-point stencil on CUDA.'
+    []
+  []
+
+  [poisson_petsc_uneven_ranks]
+    requirement = 'The system shall solve the singular steady periodic Poisson problem with the PETSc multigrid preconditioned solver on ranks that own unequal numbers of cells'
+    [3pt]
+      type = CSVDiff
+      input = poisson_mms.i
+      # 32 cells over 3 ranks (10, 11, 11): uneven slabs on every multigrid level
+      cli_args = 'TensorSolver/linear_solver=PETSC Outputs/file_base=poisson_mms_3pt'
+      csvdiff = poisson_mms_3pt.csv
+      prereq = 'poisson_petsc/3pt'
+      min_parallel = 3
+      max_parallel = 3
+      compute_devices = 'cpu'
+      detail = 'with the 3-point stencil on 3 ranks.'
+    []
+  []
+
+  [cutback]
+    requirement = 'The system shall retry an implicit finite-difference time step with a smaller time step when its linear solve does not converge'
+    [torch_pcg]
+      type = RunApp
+      input = cutback.i
+      expect_out = 'did not converge in 30 iterations.*Solve failed, cutting timestep.*did not converge in 30 iterations.*Solve failed, cutting timestep.*Time Step 1, time = 0.002'
+      compute_devices = 'cpu cuda'
+      min_slots = 2 # memory heavy
+      detail = 'using the torch preconditioned conjugate gradient solver.'
+    []
+  []
+
+  [grid_independence]
+    requirement = 'The system shall solve the singular steady periodic Poisson problem with the PETSc multigrid preconditioned solver in a number of iterations that does not grow with the grid size'
+    [n64]
+      type = RunApp
+      input = poisson_mms.i
+      cli_args = 'TensorSolver/linear_solver=PETSC n=64 Outputs/csv=false -u_ksp_converged_reason'
+      # 9 iterations measured; fail above 12
+      expect_out = 'Linear u_ solve converged due to CONVERGED_RTOL iterations'
+      absent_out = 'iterations ([0-9]{3,}|[2-9][0-9]|1[3-9])\b'
+      compute_devices = 'cpu'
+      detail = 'on a 64 x 64 grid,'
+    []
+    [n128]
+      type = RunApp
+      input = poisson_mms.i
+      cli_args = 'TensorSolver/linear_solver=PETSC n=128 Outputs/csv=false -u_ksp_converged_reason'
+      expect_out = 'Linear u_ solve converged due to CONVERGED_RTOL iterations'
+      absent_out = 'iterations ([0-9]{3,}|[2-9][0-9]|1[3-9])\b'
+      compute_devices = 'cpu'
+      detail = 'on a 128 x 128 grid, and'
+    []
+    [n256]
+      type = RunApp
+      input = poisson_mms.i
+      cli_args = 'TensorSolver/linear_solver=PETSC n=256 Outputs/csv=false -u_ksp_converged_reason'
+      expect_out = 'Linear u_ solve converged due to CONVERGED_RTOL iterations'
+      absent_out = 'iterations ([0-9]{3,}|[2-9][0-9]|1[3-9])\b'
+      compute_devices = 'cpu'
+      detail = 'on a 256 x 256 grid.'
+    []
+  []
+
+  [petsc_options]
+    requirement = 'The system shall pass PETSc options to the implicit finite-difference solve under the prefix of the solved field'
+    [default]
+      type = RunApp
+      input = be_mode.i
+      cli_args = 'TensorSolver/linear_solver=PETSC Outputs/csv=false -u_ksp_view'
+      expect_out = 'KSP Object: \(u_\).*type: cg.*PC Object: \(u_\).*type: mg'
+      compute_devices = 'cpu'
+      detail = 'with the conjugate gradient method and geometric multigrid by default,'
+    []
+    [block]
+      type = RunApp
+      input = be_mode.i
+      cli_args = "TensorSolver/linear_solver=PETSC TensorSolver/petsc_options_iname='-pc_type' "
+                 "TensorSolver/petsc_options_value='jacobi' Outputs/csv=false -u_ksp_view"
+      expect_out = 'PC Object: \(u_\) [^\n]*\n\s+type: jacobi'
+      compute_devices = 'cpu'
+      detail = 'from the solver block,'
+    []
+    [command_line]
+      type = RunApp
+      input = be_mode.i
+      cli_args = "TensorSolver/linear_solver=PETSC TensorSolver/petsc_options_iname='-pc_type' "
+                 "TensorSolver/petsc_options_value='jacobi' Outputs/csv=false -u_pc_type none "
+                 "-u_ksp_view"
+      expect_out = 'PC Object: \(u_\) [^\n]*\n\s+type: none'
+      compute_devices = 'cpu'
+      detail = 'from the command line, overriding the solver block, and'
+    []
+    [last_step]
+      type = RunApp
+      input = be_mode.i
+      # the default Chebyshev smoother takes 2 iterations
+      cli_args = 'TensorSolver/linear_solver=PETSC Outputs/csv=false -u_mg_levels_ksp_max_it 3 -u_ksp_view'
+      expect_out = 'Time Step 10,.*KSP Object: \(u_mg_levels_1_\).*maximum iterations=3'
+      compute_devices = 'cpu'
+      detail = 'for the multigrid levels, still applied in the last time step.'
+    []
+  []
+
+  [errors]
+    requirement = 'The system shall report an error if an implicit finite-difference solve is set up '
+    [not_spd]
+      type = RunException
+      input = poisson_mms.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG TensorComputes/Solve/lap/factor=0.5'
+      expect_err = 'is not symmetric positive \(semi\)definite'
+      detail = 'with an operator that is not symmetric positive (semi)definite,'
+    []
+    [nonzero_mean_source]
+      type = RunException
+      input = poisson_mms.i
+      cli_args = "TensorSolver/linear_solver=TORCH_PCG TensorComputes/Initialize/f_ic/expression='1 "
+                 "+ x'"
+      expect_err = 'the right-hand side must have zero mean'
+      detail = 'for a singular operator with a right-hand side that has a nonzero mean,'
+    []
+    [petsc_single_precision]
+      type = RunException
+      input = be_mode.i
+      cli_args = 'TensorSolver/linear_solver=PETSC Domain/floating_precision=SINGLE'
+      expect_err = 'The PETSC linear solver requires double precision'
+      compute_devices = 'cpu'
+      detail = 'with the PETSc linear solver in single precision,'
+    []
+    [petsc_mps]
+      type = RunException
+      input = be_mode.i
+      cli_args = 'TensorSolver/linear_solver=PETSC'
+      expect_err = 'The PETSC linear solver does not run on MPS'
+      compute_devices = 'mps'
+      detail = 'with the PETSc linear solver on MPS,'
+    []
+    [petsc_options_with_torch_pcg]
+      type = RunException
+      input = be_mode.i
+      cli_args = "TensorSolver/linear_solver=TORCH_PCG TensorSolver/petsc_options_iname='-pc_type' "
+                 "TensorSolver/petsc_options_value='jacobi'"
+      expect_err = 'PETSc options are not used by linear_solver = TORCH_PCG'
+      detail = 'with PETSc options for the torch linear solver,'
+    []
+    [failed_solve_without_cutback]
+      type = RunException
+      input = cutback.i
+      # two substeps of dt / 2 = 0.004 need about 34 iterations
+      cli_args = 'TensorSolver/substeps=2'
+      expect_err = 'did not converge in 30 iterations.*Use the TensorSolveIterationAdaptiveDT time stepper \(with substeps = 1\)'
+      detail = 'with a linear solve that does not converge when the time step cannot be retried,'
+    []
+    [fields_differing_in_case]
+      type = RunException
+      input = be_mode.i
+      cli_args = "TensorSolver/linear_solver=TORCH_PCG TensorSolver/buffer='u U' "
+                 "TensorSolver/operators='dudt lap; dudt lap'"
+      expect_err = "Fields 'u' and 'U' differ only in case"
+      detail = 'with two fields whose names differ only in case,'
+    []
+    [wrong_field]
+      type = RunException
+      input = be_mode.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG TensorComputes/Solve/lap/input=gold'
+      expect_err = "acts on 'gold' rather than on the solved field 'u'"
+      detail = 'with an operator acting on a field other than the solved field, or'
+    []
+    [not_fd_operator]
+      type = RunException
+      input = be_mode.i
+      cli_args = 'TensorSolver/linear_solver=TORCH_PCG TensorComputes/Solve/scale/type=ParsedCompute TensorComputes/Solve/scale/buffer=diff TensorComputes/Solve/scale/inputs=u TensorComputes/Solve/scale/expression=2*u TensorSolver/operators="dudt scale"'
+      expect_err = "Compute 'scale' is not a LinearFDOperator"
+      detail = 'with an operator that is not a finite-difference operator.'
+    []
+  []
+[]

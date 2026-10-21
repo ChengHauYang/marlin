@@ -9,6 +9,8 @@
 #include "FiniteDifferenceLaplacian.h"
 #include "gtest/gtest.h"
 
+#include "libmesh/int_range.h"
+
 #include <map>
 #include <vector>
 
@@ -112,4 +114,24 @@ TEST(LinearFDOperatorTest, Stencil5ptMatchesConvKernelCoefficients)
   EXPECT_NEAR(by_offset.at(-1), 4.0 / 3.0, 1e-12);
   EXPECT_NEAR(by_offset.at(2), -1.0 / 12.0, 1e-12);
   EXPECT_NEAR(by_offset.at(-2), -1.0 / 12.0, 1e-12);
+}
+
+// Coarse multigrid levels rediscretise at spacing 2h: every Laplacian
+// coefficient scales as 1/dx^2, so doubling the spacing divides it by 4.
+TEST(LinearFDOperatorTest, StencilRediscretisedAtDoubleSpacing)
+{
+  for (const bool wide : {false, true})
+  {
+    const std::vector<Real> dx{0.1, 0.3};
+    const std::vector<Real> dx2{0.2, 0.6};
+    const auto fine = FiniteDifferenceLaplacian::buildStencil(2, wide, dx, -1.5);
+    const auto coarse = FiniteDifferenceLaplacian::buildStencil(2, wide, dx2, -1.5);
+
+    ASSERT_EQ(fine.size(), coarse.size());
+    for (const auto i : make_range(fine.size()))
+    {
+      EXPECT_EQ(fine[i].offset, coarse[i].offset);
+      EXPECT_NEAR(coarse[i].coefficient, fine[i].coefficient / 4.0, 1e-10);
+    }
+  }
 }

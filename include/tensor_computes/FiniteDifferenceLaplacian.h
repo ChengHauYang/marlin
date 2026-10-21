@@ -26,6 +26,10 @@ public:
   virtual void computeBuffer() override;
 
   virtual std::vector<FDStencilEntry> stencilAt() const override;
+  virtual std::vector<FDStencilEntry>
+  stencilAt(const std::vector<Real> & grid_spacing) const override;
+  virtual Definiteness definiteness() const override;
+  virtual const std::string & inputBufferName() const override { return _input_name; }
 
   /**
    * Builds the isotropic 3-pt or 5-pt Laplacian stencil for a grid of the
@@ -40,6 +44,8 @@ public:
 
 protected:
   const unsigned int _radius;
+  /// input buffer name
+  const TensorInputBufferName _input_name;
   /// input buffer
   const torch::Tensor & _u_in;
   /// prefactor
