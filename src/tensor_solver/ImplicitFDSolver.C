@@ -335,15 +335,42 @@ ImplicitFDSolver::applyOperator(Field & field, const torch::Tensor & x)
   return y;
 }
 
+namespace
+{
+/// the stencil entries of all operators at the given spacing (empty: the domain's)
+std::vector<FDStencilEntry>
+fieldStencil(const std::vector<const LinearFDOperator *> & fd_operators,
+             const std::vector<Real> & grid_spacing = {})
+{
+  std::vector<FDStencilEntry> stencil;
+  for (const auto * fd_op : fd_operators)
+  {
+    const auto entries = grid_spacing.empty() ? fd_op->stencilAt() : fd_op->stencilAt(grid_spacing);
+    stencil.insert(stencil.end(), entries.begin(), entries.end());
+  }
+  return stencil;
+}
+
+/// summed centre coefficient and sum of |a_o| over the other entries of a stencil; the
+/// centre of a positive (semi)definite nonzero operator is positive
+std::pair<Real, Real>
+centreAndOffDiagonal(const std::vector<FDStencilEntry> & stencil)
+{
+  Real centre = 0.0, off_diagonal = 0.0;
+  for (const auto & entry : stencil)
+    if (std::all_of(entry.offset.begin(), entry.offset.end(), [](int o) { return o == 0; }))
+      centre += entry.coefficient;
+    else
+      off_diagonal += std::abs(entry.coefficient);
+  mooseAssert(centre > 0.0, "The centre stencil coefficient must be positive");
+  return {centre, off_diagonal};
+}
+}
+
 Real
 ImplicitFDSolver::diagonal(const Field & field) const
 {
-  Real diag = 0.0;
-  for (const auto * fd_op : field._fd_operators)
-    for (const auto & entry : fd_op->stencilAt())
-      if (std::all_of(entry.offset.begin(), entry.offset.end(), [](int o) { return o == 0; }))
-        diag += entry.coefficient;
-  return diag;
+  return centreAndOffDiagonal(fieldStencil(field._fd_operators)).first;
 }
 
 ImplicitFDSolver::SolveResult
@@ -391,20 +418,6 @@ ImplicitFDSolver::PetscSolve::~PetscSolve()
 
 namespace
 {
-/// the stencil entries of all operators at the given spacing (empty: the domain's)
-std::vector<FDStencilEntry>
-fieldStencil(const std::vector<const LinearFDOperator *> & fd_operators,
-             const std::vector<Real> & grid_spacing = {})
-{
-  std::vector<FDStencilEntry> stencil;
-  for (const auto * fd_op : fd_operators)
-  {
-    const auto entries = grid_spacing.empty() ? fd_op->stencilAt() : fd_op->stencilAt(grid_spacing);
-    stencil.insert(stencil.end(), entries.begin(), entries.end());
-  }
-  return stencil;
-}
-
 bool
 sameStencil(const std::vector<FDStencilEntry> & a, const std::vector<FDStencilEntry> & b)
 {
@@ -422,12 +435,7 @@ sameStencil(const std::vector<FDStencilEntry> & a, const std::vector<FDStencilEn
 Real
 jacobiSpectrumBound(const std::vector<FDStencilEntry> & stencil)
 {
-  Real centre = 0.0, off_diagonal = 0.0;
-  for (const auto & entry : stencil)
-    if (std::all_of(entry.offset.begin(), entry.offset.end(), [](int o) { return o == 0; }))
-      centre += entry.coefficient;
-    else
-      off_diagonal += std::abs(entry.coefficient);
+  const auto [centre, off_diagonal] = centreAndOffDiagonal(stencil);
   return 1.0 + off_diagonal / centre;
 }
 
