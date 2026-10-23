@@ -45,4 +45,6 @@ protected:
   const torch::Tensor & _u_in;
   /// prefactor
   const Real _factor;
+  /// convolution kernel of the stencil
+  torch::Tensor _kernel;
 };

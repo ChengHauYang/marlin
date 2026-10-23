@@ -37,18 +37,8 @@ FiniteDifferenceBiharmonic::FiniteDifferenceBiharmonic(const InputParameters & p
     _u_in(getInputBufferByName(_input_name, 2 * _laplacian_radius)),
     _factor(getParam<Real>("factor"))
 {
-}
-
-void
-FiniteDifferenceBiharmonic::realSpaceComputeBuffer()
-{
-  _tensor_problem.runComputeWithGhosts(*this);
-}
-
-void
-FiniteDifferenceBiharmonic::computeBuffer()
-{
-  // convolution kernel from the stencil, offset o at kernel index o + radius
+  // convolution kernel from the stencil, offset o at kernel index o + radius; the grid
+  // spacing is fixed once the domain is set up, so it is built here, on the device
   const int64_t radius = 2 * _laplacian_radius;
   const int64_t ksize = 2 * radius + 1;
   std::vector<int64_t> kernel_shape{1, 1};
@@ -62,12 +52,24 @@ FiniteDifferenceBiharmonic::computeBuffer()
       index = index * ksize + entry.offset[d] + radius;
     flat[index] = entry.coefficient;
   }
+  _kernel = kernel.to(MooseTensor::floatTensorOptions());
+}
 
+void
+FiniteDifferenceBiharmonic::realSpaceComputeBuffer()
+{
+  _tensor_problem.runComputeWithGhosts(*this);
+}
+
+void
+FiniteDifferenceBiharmonic::computeBuffer()
+{
+  const int64_t radius = 2 * _laplacian_radius;
   std::vector<int64_t> input_view{1, 1};
   input_view.insert(input_view.end(), _u_in.sizes().begin(), _u_in.sizes().end());
   // conv1d/2d/3d by dimension of the kernel
   const auto result = at::convolution(_u_in.view(input_view),
-                                      kernel.to(_u_in.options()),
+                                      _kernel,
                                       {},
                                       std::vector<int64_t>(_dim, 1),
                                       std::vector<int64_t>(_dim, radius),
