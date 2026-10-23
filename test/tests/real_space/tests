@@ -219,7 +219,18 @@
       cli_args = 'Postprocessors/change/type=TensorIntegralChangePostprocessor Postprocessors/change/buffer=u Outputs/file_base=diffusion_change_out'
       csvdiff = diffusion_change_out.csv
       compute_devices = 'cpu cuda xpu'
-      detail = 'in double precision, and'
+      detail = 'in double precision,'
+    []
+    [double_2_ranks]
+      type = CSVDiff
+      input = diffusion.i
+      cli_args = 'Postprocessors/change/type=TensorIntegralChangePostprocessor Postprocessors/change/buffer=u Outputs/file_base=diffusion_change_out'
+      csvdiff = diffusion_change_out.csv
+      prereq = 'integral_change/double'
+      min_parallel = 2
+      max_parallel = 2
+      compute_devices = 'cpu'
+      detail = 'in double precision on 2 ranks, and'
     []
     [mps]
       type = CSVDiff
