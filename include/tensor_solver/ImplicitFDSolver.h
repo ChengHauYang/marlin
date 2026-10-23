@@ -135,6 +135,9 @@ protected:
   /// maximum number of linear iterations
   const unsigned int _l_max_its;
 
+  /// smooth the PCMG levels by Gershgorin-weighted damped Jacobi instead of Chebyshev
+  const bool _damped_jacobi;
+
   std::vector<Field> _fields;
 
   /// computes of the root compute that update the explicit terms (not the field operators)

@@ -68,6 +68,13 @@ ImplicitFDSolver::validParams()
       "l_tol", 1e-8, "l_tol > 0", "Relative tolerance on the unpreconditioned residual norm");
   params.addRangeCheckedParam<unsigned int>(
       "l_max_its", 10000, "l_max_its > 0", "Maximum number of linear iterations");
+  MooseEnum smoother("CHEBYSHEV DAMPED_JACOBI", "CHEBYSHEV");
+  params.addParam<MooseEnum>(
+      "smoother",
+      smoother,
+      "Multigrid level smoother of the PETSC linear solver. CHEBYSHEV is PCMG's default, with "
+      "SOR on the coarse levels on CPU and Jacobi on the fine level and on CUDA; DAMPED_JACOBI "
+      "is Jacobi weighted by the Gershgorin bound of each level operator.");
 
   // PETSc options of the PETSC backend, applied with the prefix <buffer>_
   params += Moose::PetscSupport::getPetscValidParams();
@@ -81,7 +88,8 @@ ImplicitFDSolver::ImplicitFDSolver(const InputParameters & parameters)
   : TensorSolver(parameters),
     IterativeTensorSolverInterface(),
     _l_tol(getParam<Real>("l_tol")),
-    _l_max_its(getParam<unsigned int>("l_max_its"))
+    _l_max_its(getParam<unsigned int>("l_max_its")),
+    _damped_jacobi(getParam<MooseEnum>("smoother") == "DAMPED_JACOBI")
 {
   // backend selection
   const auto device = MooseTensor::floatTensorOptions().device();
@@ -113,9 +121,10 @@ ImplicitFDSolver::ImplicitFDSolver(const InputParameters & parameters)
                  "linear_solver = TORCH_PCG.");
   }
   else
-    for (const auto & name : {"petsc_options", "petsc_options_iname", "petsc_options_value"})
+    for (const auto & name :
+         {"petsc_options", "petsc_options_iname", "petsc_options_value", "smoother"})
       if (isParamSetByUser(name))
-        paramError(name, "PETSc options are not used by linear_solver = TORCH_PCG.");
+        paramError(name, "This parameter is not used by linear_solver = TORCH_PCG.");
 
   // the operators act on ghosted real space buffers
   if (!_domain.isRealSpaceMode())
@@ -593,21 +602,22 @@ ImplicitFDSolver::setupPetsc(Field & field)
     const auto B = ps.coarse[levels - 2 - i];
     PetscCallAbort(comm, KSPSetOperators(smoother, B, B));
   }
-  // Damped Jacobi smoothing (Richardson + Jacobi) on every level, with the weight set from
-  // the level's stencil in assembleCoarseLevels. PCMG's default Chebyshev estimates its
-  // eigenvalue bounds with a few Krylov steps, and those estimates went indefinite
-  // (KSP_DIVERGED_INDEFINITE_PC) on the implicit biharmonic as dt grew. Jacobi also runs
-  // on CUDA, where PETSc's SOR runs on the host. PCMG level 0 is the coarse LU when
-  // levels > 1.
+  // PCMG's default smoother is Chebyshev + SOR. The fine shell has no SOR, so it uses
+  // Jacobi from its diagonal. On CUDA the coarse levels use Jacobi too, since PETSc's SOR
+  // runs on the host. Chebyshev estimates its eigenvalue bounds with a few Krylov steps;
+  // DAMPED_JACOBI (Richardson + Jacobi, weighted in assembleCoarseLevels) needs no
+  // estimate. PCMG level 0 is the coarse LU when levels > 1.
   for (const auto i : make_range(levels > 1 ? 1u : 0u, levels))
-  {
-    KSP smoother;
-    PC smoother_pc;
-    PetscCallAbort(comm, PCMGGetSmoother(pc, PetscInt(i), &smoother));
-    PetscCallAbort(comm, KSPSetType(smoother, KSPRICHARDSON));
-    PetscCallAbort(comm, KSPGetPC(smoother, &smoother_pc));
-    PetscCallAbort(comm, PCSetType(smoother_pc, PCJACOBI));
-  }
+    if (_damped_jacobi || i == levels - 1 || cuda)
+    {
+      KSP smoother;
+      PC smoother_pc;
+      PetscCallAbort(comm, PCMGGetSmoother(pc, PetscInt(i), &smoother));
+      if (_damped_jacobi)
+        PetscCallAbort(comm, KSPSetType(smoother, KSPRICHARDSON));
+      PetscCallAbort(comm, KSPGetPC(smoother, &smoother_pc));
+      PetscCallAbort(comm, PCSetType(smoother_pc, PCJACOBI));
+    }
   if (field._singular && levels > 1)
   {
     // the coarse LU meets a zero pivot from the constant nullspace; shifting it changes
@@ -665,6 +675,7 @@ ImplicitFDSolver::assembleCoarseLevels(Field & field)
   // the smoother weights are set only for PCMG (not e.g. for -<buffer>_pc_type jacobi)
   PetscBool is_mg;
   PetscCallAbort(comm, PetscObjectTypeCompare((PetscObject)pc, PCMG, &is_mg));
+  const bool set_weights = is_mg && _damped_jacobi;
 
   // hierarchy level k (0 = fine) has spacing 2^k h and is PCMG level levels - 1 - k
   for (const auto k : make_range(levels))
@@ -695,7 +706,7 @@ ImplicitFDSolver::assembleCoarseLevels(Field & field)
     // 2^(dim k) scaling cancels); omega = 4 / (3 rho) damps the upper half [rho/2, rho]
     // by at least 1/3 per sweep and keeps |1 - omega lambda| < 1 on (0, rho].
     const auto pcmg_level = levels - 1 - k;
-    if (!is_mg || (levels > 1 && pcmg_level == 0))
+    if (!set_weights || (levels > 1 && pcmg_level == 0))
       continue;
     KSP smoother;
     PetscCallAbort(comm, PCMGGetSmoother(pc, PetscInt(pcmg_level), &smoother));
@@ -712,7 +723,7 @@ ImplicitFDSolver::assembleCoarseLevels(Field & field)
   }
 
   // the shell's action changed too; bump its state and reset the KSP operators so
-  // that PCMG sets up every level again (Jacobi diagonals, coarse factorisation)
+  // that PCMG sets up every level again (Chebyshev bounds, Jacobi diagonals, coarse LU)
   PetscCallAbort(comm, PetscObjectStateIncrease((PetscObject)ps.fine));
   PetscCallAbort(comm, KSPSetOperators(ps.ksp, ps.fine, ps.fine));
   ps.assembled_stencil = stencil;
