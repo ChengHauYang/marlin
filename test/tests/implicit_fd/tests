@@ -406,6 +406,19 @@
       compute_devices = 'cpu'
       detail = 'by Chebyshev with SOR on the coarse levels and Jacobi on the fine level by default,'
     []
+    [chebyshev_new_dt]
+      type = RunApp
+      input = biharmonic_mode.i
+      # Jacobi on the levels, as on CUDA: Chebyshev bounds of the coarse levels kept from
+      # dt = 1e-6 made the preconditioner indefinite at dt = 100
+      cli_args = "TensorSolver/linear_solver=PETSC n=64 Outputs/csv=false Executioner/num_steps=2 "
+                 "Executioner/TimeStepper/type=FunctionDT "
+                 "Executioner/TimeStepper/function='if(t<1e-6,1e-6,100)' -u_mg_levels_pc_type jacobi "
+                 "-u_ksp_converged_reason"
+      expect_out = 'Time Step 2,.*Linear u_ solve converged due to CONVERGED_RTOL'
+      compute_devices = 'cpu'
+      detail = 'with the Chebyshev eigenvalue bounds of every level estimated again when the time step changes,'
+    []
     [weight]
       type = RunApp
       input = biharmonic_mode.i

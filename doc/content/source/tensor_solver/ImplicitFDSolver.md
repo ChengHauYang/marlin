@@ -40,9 +40,9 @@ grids coarsened by two per axis and assembled, connected by cell-centred multili
 Every level but the coarsest, which is solved by LU, is smoothed by two sweeps of the `smoother`.
 The default, `CHEBYSHEV`, is PCMG's default Chebyshev smoother, preconditioned by SOR on the coarse
 levels on CPU and by Jacobi on the matrix-free fine level and on every level on CUDA (PETSc's SOR
-runs on the host). Chebyshev estimates each level's eigenvalue bounds with a few Krylov steps; on
-the implicit biharmonic at large time steps this estimate made the preconditioner indefinite on
-CUDA. `smoother = DAMPED_JACOBI` needs no estimate: it is damped Jacobi
+runs on the host). Chebyshev estimates each level's eigenvalue bounds with a few Krylov steps, again
+on every level whenever the operators change (e.g. with the time step). `smoother = DAMPED_JACOBI`
+needs no estimate: it is damped Jacobi
 (`KSPRICHARDSON` + `PCJACOBI`) with the weight $\omega = 4/(3\rho)$, where
 $\rho = 1 + \sum_{o \ne 0} |a_o| / a_0$ is the Gershgorin bound on the Jacobi scaled spectrum from
 the level's stencil coefficients $a_o$. The weight is recomputed when the operators change (e.g.

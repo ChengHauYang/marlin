@@ -699,6 +699,14 @@ ImplicitFDSolver::assembleCoarseLevels(Field & field)
         PetscCallAbort(comm, MatSetOption(B, MAT_SPD, PETSC_TRUE));
         PetscCallAbort(comm, MatSetOption(B, MAT_SPD_ETERNAL, PETSC_TRUE));
       }
+      // without a DM, PCMG only sets up the fine smoother again on a new matrix; resetting
+      // the operators makes the coarse smoothers redo theirs too (Chebyshev bounds)
+      if (is_mg)
+      {
+        KSP smoother;
+        PetscCallAbort(comm, PCMGGetSmoother(pc, PetscInt(levels - 1 - k), &smoother));
+        PetscCallAbort(comm, KSPSetOperators(smoother, B, B));
+      }
     }
 
     // damped Jacobi weight of the level smoother (PCMG level 0 is the coarse LU when
@@ -723,7 +731,7 @@ ImplicitFDSolver::assembleCoarseLevels(Field & field)
   }
 
   // the shell's action changed too; bump its state and reset the KSP operators so
-  // that PCMG sets up every level again (Chebyshev bounds, Jacobi diagonals, coarse LU)
+  // that PCMG sets up again (the fine smoother, the coarse factorisation)
   PetscCallAbort(comm, PetscObjectStateIncrease((PetscObject)ps.fine));
   PetscCallAbort(comm, KSPSetOperators(ps.ksp, ps.fine, ps.fine));
   ps.assembled_stencil = stencil;
