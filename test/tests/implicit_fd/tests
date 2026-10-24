@@ -439,6 +439,19 @@
     []
   []
 
+  [divergence_test]
+    requirement = 'The system shall not stop a converging PETSc solve of a large implicit time step on the divergence test'
+    [biharmonic_large_dt]
+      type = RunApp
+      input = biharmonic_mode.i
+      # warm started from u_old, ||r0|| / ||b|| = dt Mkappa lambda^2 ~ 6e3 at dt = 1000; the
+      # first CG residual exceeded the default divtol of 1e4 times ||b||; it converges in 22
+      cli_args = 'TensorSolver/linear_solver=PETSC TensorSolver/smoother=DAMPED_JACOBI n=128 dt=1000 Executioner/num_steps=1 Outputs/csv=false -u_ksp_converged_reason'
+      expect_out = 'Linear u_ solve converged due to CONVERGED_RTOL'
+      compute_devices = 'cpu'
+    []
+  []
+
   [errors]
     requirement = 'The system shall report an error if an implicit finite-difference solve is set up '
     [not_spd]

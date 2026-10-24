@@ -582,7 +582,11 @@ ImplicitFDSolver::setupPetsc(Field & field)
   PetscCallAbort(comm, KSPSetOperators(ps.ksp, ps.fine, ps.fine));
   PetscCallAbort(comm, KSPSetType(ps.ksp, KSPCG));
   PetscCallAbort(comm, KSPSetNormType(ps.ksp, KSP_NORM_UNPRECONDITIONED));
-  PetscCallAbort(comm, KSPSetTolerances(ps.ksp, _l_tol, PETSC_CURRENT, PETSC_CURRENT, _l_max_its));
+  // no divergence test, as in TORCH_PCG: with the warm start x0 = u_old the residual is
+  // compared to ||b|| ~ ||u_old|| / dt, so at large dt ||r0|| / ||b|| ~ dt ||B u_old|| / ||u_old||
+  // already nears the default divtol and CG's nonmonotone residual crosses it
+  PetscCallAbort(comm,
+                 KSPSetTolerances(ps.ksp, _l_tol, PETSC_CURRENT, PETSC_UNLIMITED, _l_max_its));
   PetscCallAbort(comm, KSPSetInitialGuessNonzero(ps.ksp, PETSC_TRUE));
 
   PC pc;

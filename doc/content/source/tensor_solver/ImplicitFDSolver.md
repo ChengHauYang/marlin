@@ -48,6 +48,10 @@ $\rho = 1 + \sum_{o \ne 0} |a_o| / a_0$ is the Gershgorin bound on the Jacobi sc
 the level's stencil coefficients $a_o$. The weight is recomputed when the operators change (e.g.
 with the time step), unless `-<buffer>_mg_levels_ksp_richardson_scale` is set. It takes more
 iterations on the biharmonic, and their number grows with the grid size.
+The divergence test is off by default (`-<buffer>_ksp_divtol` sets one), as in `TORCH_PCG`: the
+solve is warm started from the old solution and its residual compared to $\|b\|$, which scales as
+$1/\Delta t$, so at large time steps the first residuals exceed PETSc's default divergence
+tolerance on a converging solve.
 PETSc options apply with the field name as prefix: `petsc_options_iname = '-pc_type'` with
 `petsc_options_value = 'jacobi'` sets `-u_pc_type jacobi` for field `u`. The block options apply to
 every field, and command line options (e.g. `-u_mg_levels_ksp_max_it 3`) override them.
