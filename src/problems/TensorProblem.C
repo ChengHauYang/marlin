@@ -664,6 +664,27 @@ TensorProblem::checkBoundaryConditions() const
                      key.first,
                      "' is not read with ghost layers by any compute, so this boundary "
                      "condition has no effect.");
+
+  // the deepest ghost layer a compute reads must have a mirror among the owned cells, and the
+  // boundary condition must be able to fill it
+  const auto owned = _domain.getLocalGridSize();
+  for (const auto & [key, bc] : _bcs)
+  {
+    const auto ghost_layers = _buffer_ghost_layers.at(key.first);
+    const auto d = bc->faceDim();
+    if (int64_t(ghost_layers) > int64_t(owned[d]))
+      bc->paramError("variable",
+                     "Buffer '",
+                     key.first,
+                     "' is read with ",
+                     ghost_layers,
+                     " ghost layers, but this rank owns only ",
+                     owned[d],
+                     " cells normal to the ",
+                     TensorBoundaryCondition::faceName(key.second),
+                     " face. Use a finer grid or fewer ranks along that axis.");
+    bc->checkGhostLayers(ghost_layers, _domain.getGridSpacing()(d));
+  }
 }
 
 void

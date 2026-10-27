@@ -163,7 +163,40 @@ TEST(TensorBoundaryConditionTest, SecondGhostLayer)
   checkSecondGhostLayer(/*a=*/2.0, /*b=*/3.0, /*c=*/1.25, /*dx=*/0.05);
 }
 
-TEST(TensorBoundaryConditionTest, MoreThanTwoGhostLayersIsAnError)
+TEST(TensorBoundaryConditionTest, DeepGhostLayers)
+{
+  // three layers (a 7-point stencil): layer l and owned cell l are (2l + 1) dx apart, centred on
+  // the face; Dirichlet gives the odd mirror about c, Neumann the even mirror plus the flux
+  const int64_t halo = 3;
+  const int64_t owned_extent = 4;
+  const Real dx = 0.1;
+  const Real tolerance =
+      MooseTensor::floatTensorOptions().dtype() == torch::kFloat64 ? 1e-12 : 1e-5;
+  const std::vector<Real> u{0.3, -1.1, 0.7, 2.0};
+  for (const auto & [a, b, c] :
+       std::vector<std::array<Real, 3>>{{1.0, 0.0, 3.5}, {0.0, 1.0, -2.0}, {2.0, 3.0, 1.25}})
+    for (const bool is_upper_face : {false, true})
+    {
+      auto buffer = torch::zeros({owned_extent + 2 * halo}, MooseTensor::floatTensorOptions());
+      for (const auto i : index_range(u))
+        buffer[halo + int64_t(i)] = u[i];
+      TensorRobinBC::fillGhostCellsStatic(
+          buffer, is_upper_face, /*face_dim=*/0, 3, halo, owned_extent, a, b, scalar(c), dx);
+      for (const auto l : make_range(int64_t(3)))
+      {
+        const auto u_l = u[is_upper_face ? owned_extent - 1 - l : l];
+        const auto ghost =
+            buffer[is_upper_face ? halo + owned_extent + l : halo - 1 - l].item<double>();
+        const auto spacing = (2.0 * l + 1.0) * dx;
+        EXPECT_NEAR(a * (u_l + ghost) / 2.0 + b * (ghost - u_l) / spacing - c,
+                    0.0,
+                    tolerance * (std::abs(a) / 2.0 + std::abs(b) / dx))
+            << "a=" << a << " b=" << b << " layer=" << l << " is_upper_face=" << is_upper_face;
+      }
+    }
+}
+
+TEST(TensorBoundaryConditionTest, MoreGhostLayersThanOwnedCellsIsAnError)
 {
   auto buffer = torch::zeros({10}, MooseTensor::floatTensorOptions());
   EXPECT_THROW(TensorRobinBC::fillGhostCellsStatic(buffer,
@@ -171,12 +204,20 @@ TEST(TensorBoundaryConditionTest, MoreThanTwoGhostLayersIsAnError)
                                                    /*face_dim=*/0,
                                                    /*ghost_layers=*/3,
                                                    /*halo=*/3,
-                                                   /*owned_extent=*/4,
+                                                   /*owned_extent=*/2,
                                                    1.0,
                                                    0.0,
                                                    scalar(0.0),
                                                    0.1),
                std::exception);
+}
+
+TEST(TensorBoundaryConditionTest, ZeroThirdLayerDenominator)
+{
+  // a/2 + b/(5dx) = 0 with b = 1, dx = 0.1; the first two layers' denominators are nonzero, so the
+  // third layer is reported, and with two layers none is
+  EXPECT_EQ(TensorRobinBC::zeroDenominatorLayer(-4.0, 1.0, 0.1, 3), 2u);
+  EXPECT_EQ(TensorRobinBC::zeroDenominatorLayer(-4.0, 1.0, 0.1, 2), 2u);
 }
 
 TEST(TensorBoundaryConditionTest, ZeroSecondLayerDenominatorIsAnError)

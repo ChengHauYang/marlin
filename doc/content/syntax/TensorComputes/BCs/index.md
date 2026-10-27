@@ -32,8 +32,12 @@ presets) is a constant, or varies along the face, given by at most one of
   the new time by one time step. A buffer that no compute or initial condition writes is
   an error. The compute runs before any compute that reads the variable with ghost cells.
 
-A two-layer stencil (the 5-point Laplacian) fills the second ghost layer from the same
-condition with the spacing $3 \Delta x$.
+A stencil reaching $L$ cells across the face (e.g. two for the 5-point Laplacian) needs $L$ ghost
+layers. Ghost layer $l = 0, \dots, L-1$ is filled from the same condition applied to it and its
+mirror, owned cell $l$ from the face, which are $(2l + 1) \Delta x$ apart: the even mirror for a
+zero-flux face and the odd mirror about $c$ for a Dirichlet face. Every rank next to the face must
+own at least $L$ cells normal to it, and $a/2 + b/((2l + 1) \Delta x)$ must be nonzero for each
+layer; both are checked at setup.
 
 ## Example Input File Syntax
 

@@ -67,6 +67,9 @@ public:
   /// every rank before the variable's ghost exchange
   virtual void prepareFaceData() {}
 
+  /// error at setup if fillGhostCells() cannot fill ghost_layers layers at the spacing dx
+  virtual void checkGhostLayers(unsigned int /*ghost_layers*/, Real /*dx*/) const {}
+
   /// Boundary conditions are not driven by the normal compute list.
   virtual void computeBuffer() override {}
 

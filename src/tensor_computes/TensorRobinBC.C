@@ -84,48 +84,51 @@ TensorRobinBC::fillGhostCellsStatic(torch::Tensor & buffer,
                                     const torch::Tensor & c,
                                     Real dx)
 {
-  if (ghost_layers > 2)
-    ::mooseError(
-        "TensorRobinBC fills at most two ghost layers, but ", ghost_layers, " were requested.");
-  // the second ghost layer divides by a/2 + b/(3dx) (the constructor checks a/2 + b/dx)
-  if (ghost_layers == 2 &&
-      std::abs(a / 2.0 + b / (3.0 * dx)) <= 1e-12 * (std::abs(a) / 2.0 + std::abs(b) / (3.0 * dx)))
-    ::mooseError("TensorRobinBC with two ghost layers requires a/2 + b/(3*dx) to be nonzero (dx = ",
+  if (const auto layer = zeroDenominatorLayer(a, b, dx, ghost_layers); layer < ghost_layers)
+    ::mooseError("TensorRobinBC with ",
+                 ghost_layers,
+                 " ghost layers requires a/2 + b/(",
+                 2 * layer + 1,
+                 "*dx) to be nonzero (dx = ",
                  dx,
                  " is the grid spacing normal to the face).");
+  if (int64_t(ghost_layers) > owned_extent)
+    ::mooseError("TensorRobinBC fills ghost layer l from owned cell l, but ",
+                 ghost_layers,
+                 " ghost layers were requested next to ",
+                 owned_extent,
+                 " owned cells.");
 
-  // Marlin's real-space grid is cell-centered (axis built from
-  // min+dx/2 ... max-dx/2), so for either face the boundary sits at the
-  // midpoint between the first interior cell (u0) and the first ghost cell
-  // (ughost), and the outward normal derivative at that midpoint is well
-  // approximated by a central difference between u0 and ughost. Both the
-  // lower and upper face reduce to the SAME formula (ghostCoefficientOnU0 /
-  // ghostConstantTerm) because "ughost" always means "the cell on the
-  // outward side of u0" for whichever face is being filled.
-  const auto u0 = is_upper_face ? buffer.narrow(face_dim, halo + owned_extent - 1, 1)
-                                : buffer.narrow(face_dim, halo, 1);
-
-  const auto coeff = ghostCoefficientOnU0(a, b, dx);
-  // c / (a/2 + b/dx), see ghostConstantTerm
-  const auto rhs = c * ghostConstantTerm(a, b, 1.0, dx);
-
-  // first ghost row, directly from the Robin relation at the face
-  auto ghost1 = is_upper_face ? buffer.narrow(face_dim, halo + owned_extent, 1)
-                              : buffer.narrow(face_dim, halo - 1, 1);
-  ghost1.copy_(coeff * u0 + rhs);
-
-  if (ghost_layers >= 2)
+  // Marlin's real-space grid is cell-centered (axis built from min+dx/2 ... max-dx/2), so the
+  // face sits midway between owned cell l (counted from the face) and ghost layer l, which are
+  // (2l + 1) dx apart. Each layer applies the Robin relation to that pair, with the central
+  // difference over the pair for du/dn. This is exact for linear fields and gives the even
+  // mirror ghost_l = u_l for zero flux and the odd mirror ghost_l = 2c - u_l for Dirichlet. The
+  // lower and upper face reduce to the same formula (ghostCoefficientOnU0 / ghostConstantTerm)
+  // because the ghost is always the cell on the outward side.
+  for (const auto l : make_range(int64_t(ghost_layers)))
   {
-    // second ghost row: the same Robin relation on the pair (u1, ghost2), which is also
-    // centred on the face but 3*dx apart. Exact for linear fields; the even mirror
-    // ghost2 = u1 for zero flux and the odd mirror ghost2 = 2c - u1 for Dirichlet.
-    const auto u1 = is_upper_face ? buffer.narrow(face_dim, halo + owned_extent - 2, 1)
-                                  : buffer.narrow(face_dim, halo + 1, 1);
-    auto ghost2 = is_upper_face ? buffer.narrow(face_dim, halo + owned_extent + 1, 1)
-                                : buffer.narrow(face_dim, halo - 2, 1);
-    ghost2.copy_(ghostCoefficientOnU0(a, b, 3.0 * dx) * u1 +
-                 c * ghostConstantTerm(a, b, 1.0, 3.0 * dx));
+    const auto spacing = (2.0 * l + 1.0) * dx;
+    const auto u_l = is_upper_face ? buffer.narrow(face_dim, halo + owned_extent - 1 - l, 1)
+                                   : buffer.narrow(face_dim, halo + l, 1);
+    auto ghost_l = is_upper_face ? buffer.narrow(face_dim, halo + owned_extent + l, 1)
+                                 : buffer.narrow(face_dim, halo - 1 - l, 1);
+    ghost_l.copy_(ghostCoefficientOnU0(a, b, spacing) * u_l +
+                  c * ghostConstantTerm(a, b, 1.0, spacing));
   }
+}
+
+unsigned int
+TensorRobinBC::zeroDenominatorLayer(Real a, Real b, Real dx, unsigned int ghost_layers)
+{
+  // layer l divides by a/2 + b/((2l + 1) dx)
+  for (const auto l : make_range(ghost_layers))
+  {
+    const auto spacing = (2.0 * l + 1.0) * dx;
+    if (std::abs(a / 2.0 + b / spacing) <= 1e-12 * (std::abs(a) / 2.0 + std::abs(b) / spacing))
+      return l;
+  }
+  return ghost_layers;
 }
 
 void
@@ -145,6 +148,24 @@ TensorRobinBC::fillGhostCells(torch::Tensor & buffer,
                        _b,
                        faceValue(),
                        dx);
+}
+
+void
+TensorRobinBC::checkGhostLayers(unsigned int ghost_layers, Real dx) const
+{
+  if (const auto layer = zeroDenominatorLayer(_a, _b, dx, ghost_layers); layer < ghost_layers)
+    paramError("a",
+               "Buffer '",
+               getVariableName(),
+               "' is read with ",
+               ghost_layers,
+               " ghost layers, and ghost layer ",
+               layer + 1,
+               " divides by a/2 + b/(",
+               2 * layer + 1,
+               "*dx), which is zero (dx = ",
+               dx,
+               " is the grid spacing normal to the face).");
 }
 
 void

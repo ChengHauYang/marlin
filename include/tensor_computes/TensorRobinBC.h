@@ -34,14 +34,20 @@ public:
   /// exchange the halo of c_buffer along the face
   virtual void prepareFaceData() override;
 
+  virtual void checkGhostLayers(unsigned int ghost_layers, Real dx) const override;
+
   /**
    * Solve a*(u0 + ughost)/2 + b*(ughost - u0)/dx = c for ughost = coefficient*u0 +
    * constant, with dx > 0 the unsigned spacing. The ghost cell lies on the outward
    * side of either face, so the same expression holds on the lower and upper face.
-   * fillGhostCellsStatic() builds from these, with spacing 3 dx for the second layer.
+   * fillGhostCellsStatic() builds from these, with spacing (2l + 1) dx for ghost layer l.
    */
   static Real ghostCoefficientOnU0(Real a, Real b, Real dx);
   static Real ghostConstantTerm(Real a, Real b, Real c, Real dx);
+
+  /// the first ghost layer l < ghost_layers whose denominator a/2 + b/((2l + 1) dx) is zero,
+  /// or ghost_layers if there is none
+  static unsigned int zeroDenominatorLayer(Real a, Real b, Real dx, unsigned int ghost_layers);
 
   /// Object-independent core of fillGhostCells(), used by the instance method and the unit test.
   /// c is a scalar tensor or has the shape of a ghost slice (size 1 along face_dim).
