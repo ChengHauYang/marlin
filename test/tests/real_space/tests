@@ -329,7 +329,7 @@
   [deep_ghost_layer_errors]
     issues = '#191'
     design = 'syntax/TensorComputes/BCs/index.md'
-    requirement = 'The system shall report an error at setup when a buffer read with ghost layers next to a non-periodic face '
+    requirement = 'The system shall report an error at setup when a buffer read with ghost layers '
     [too_few_owned_cells]
       type = RunException
       input = deep_ghost_faces.i
@@ -337,7 +337,7 @@
       expect_err = "is read with 4 ghost layers, but this rank owns only 3 cells normal to the left "
                    "face"
       compute_devices = 'cpu'
-      detail = 'has fewer owned cells normal to the face than ghost layers, or'
+      detail = 'has fewer owned cells normal to a non-periodic face than ghost layers,'
     []
     [zero_layer_denominator]
       type = RunException
@@ -346,7 +346,16 @@
       cli_args = 'TensorComputes/BCs/left/type=TensorRobinBC TensorComputes/BCs/left/a=-0.4 TensorComputes/BCs/left/b=1'
       expect_err = 'ghost layer 3 divides by a/2 \+ b/\(5\*dx\), which is zero'
       compute_devices = 'cpu'
-      detail = 'has a Robin condition whose ghost relation for one of the layers divides by zero.'
+      detail = 'has a Robin condition on such a face whose ghost relation for one of the layers divides by zero, or'
+    []
+    [too_few_periodic_cells]
+      type = RunException
+      input = deep_ghost_faces.i
+      cli_args = 'Domain/ny=3 Domain/ymax=3'
+      expect_err = "is read with 4 ghost layers, but this rank owns only 3 cells along the periodic "
+                   "y axis"
+      compute_devices = 'cpu'
+      detail = 'is read with more ghost layers than this rank owns cells along a periodic axis.'
     []
   []
 []

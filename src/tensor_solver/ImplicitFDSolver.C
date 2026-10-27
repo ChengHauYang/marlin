@@ -401,7 +401,8 @@ ImplicitFDSolver::substep()
     // write x into u and apply the operators to it once more, so that their output buffers
     // hold A_i u (with the boundary values) rather than A_i of the last Krylov vector
     applyOperator(field, x);
-    _tensor_problem.exchangeGhostLayers(field._name, _tensor_problem.getMaxGhostLayer());
+    _tensor_problem.exchangeGhostLayers(field._name,
+                                        _tensor_problem.getBufferGhostLayers(field._name));
   }
   _tensor_problem.endFixedBoundaryData();
 }

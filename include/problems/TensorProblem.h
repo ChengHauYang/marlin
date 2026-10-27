@@ -137,6 +137,8 @@ public:
   /// get the domain shape (to build tensors from scratch) TODO: make sure this is local
   const torch::IntArrayRef & getShape() { return _shape; }
   unsigned int getMaxGhostLayer() const { return _max_ghost_layers; }
+  /// the deepest ghost layer any compute reads of buffer_name (0 if none reads its ghosts)
+  unsigned int getBufferGhostLayers(const std::string & buffer_name) const;
   std::vector<int64_t> getLocalTensorShape(const std::vector<int64_t> & extra_dims) const;
 
   typedef std::vector<std::shared_ptr<TensorOperatorBase>> TensorComputeList;

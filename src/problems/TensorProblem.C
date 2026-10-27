@@ -685,6 +685,21 @@ TensorProblem::checkBoundaryConditions() const
                      " face. Use a finer grid or fewer ranks along that axis.");
     bc->checkGhostLayers(ghost_layers, _domain.getGridSpacing()(d));
   }
+
+  // along a periodic axis the ghost layers come from the neighbouring rank's owned cells (or this
+  // rank's own, without a split), which must be at least as many
+  for (const auto & [buffer_name, ghost_layers] : _buffer_ghost_layers)
+    for (const auto d : make_range(_dim))
+      if (periodic[d] && int64_t(ghost_layers) > int64_t(owned[d]))
+        mooseError("Buffer '",
+                   buffer_name,
+                   "' is read with ",
+                   ghost_layers,
+                   " ghost layers, but this rank owns only ",
+                   owned[d],
+                   " cells along the periodic ",
+                   "xyz"[d],
+                   " axis. Use a finer grid or fewer ranks along that axis.");
 }
 
 void
@@ -966,6 +981,13 @@ TensorProblem::getBufferBase(const std::string & buffer_name)
   if (it == _tensor_buffer.end())
     mooseError("TensorBuffer '", buffer_name, " does not exist in the system.");
   return *it->second.get();
+}
+
+unsigned int
+TensorProblem::getBufferGhostLayers(const std::string & buffer_name) const
+{
+  const auto it = _buffer_ghost_layers.find(buffer_name);
+  return it == _buffer_ghost_layers.end() ? 0 : it->second;
 }
 
 void

@@ -171,9 +171,11 @@ TensorRobinBC::checkGhostLayers(unsigned int ghost_layers, Real dx) const
 void
 TensorRobinBC::prepareFaceData()
 {
+  // the variable's ghost fill reads c across the variable's halo along the other axes
   if (_c_buffer)
-    _tensor_problem.exchangeGhostLayers(
-        getParam<TensorInputBufferName>("c_buffer"), _tensor_problem.getMaxGhostLayer(), faceDim());
+    _tensor_problem.exchangeGhostLayers(getParam<TensorInputBufferName>("c_buffer"),
+                                        _tensor_problem.getBufferGhostLayers(getVariableName()),
+                                        faceDim());
 }
 
 torch::Tensor
