@@ -133,8 +133,11 @@ Mat createStencilMatrix(DM da, const std::vector<FDStencilEntry> & stencil);
 /**
  * Gershgorin bound on the spectrum of D^-1 A for the operator assembleStencilOperator
  * builds on da: the maximum over rows of 1 + sum_{off-diagonal} |a| / D. Rows next to a
- * boundary face differ from the interior ones; on a periodic grid every row is the same.
- * Entries on the same column are added first, as in the assembled matrix.
+ * boundary face differ from the interior ones; on a periodic grid every row is the same,
+ * so only the owned rows within the stencil width of a face and one interior row are
+ * evaluated. Entries folded onto the same column are added first, as in the assembled
+ * matrix; periodic columns are not wrapped, so offsets that wrap onto one column on a small
+ * periodic grid are counted separately (which still gives an upper bound).
  */
 Real jacobiSpectrumBound(DM da,
                          const std::vector<FDStencilEntry> & stencil,

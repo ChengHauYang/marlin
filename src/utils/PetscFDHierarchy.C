@@ -130,7 +130,49 @@ mergedStencil(const std::vector<FDStencilEntry> & stencil, unsigned int dim, Pet
   return merged;
 }
 
-/// Call row_fn(row, cols, values) for every owned row of the folded operator on da
+/// row indices per DMDA axis
+using RowIndices = std::array<std::vector<PetscInt>, 3>;
+
+/// every owned row index per DMDA axis
+RowIndices
+ownedRows(const DMDAInfo & info)
+{
+  RowIndices rows;
+  for (const auto a : make_range(3u))
+    for (const auto i : make_range(info.size[a]))
+      rows[a].push_back(info.start[a] + i);
+  return rows;
+}
+
+/**
+ * Owned row indices per DMDA axis that represent every owned row of the folded operator: a
+ * row folds a ghost along a non-periodic axis only within the stencil width of a face, so
+ * the owned rows at distance >= width from both faces have the same entries (relative to
+ * the row) and one of them stands for all. On a periodic axis nothing is folded, so one
+ * owned row stands for all.
+ */
+RowIndices
+representativeRows(const DMDAInfo & info, const std::array<bool, 3> & periodic, PetscInt width)
+{
+  RowIndices rows;
+  for (const auto a : make_range(3u))
+  {
+    bool interior_taken = false;
+    for (const auto i : make_range(info.size[a]))
+    {
+      const auto row = info.start[a] + i;
+      const bool interior = periodic[a] || (row >= width && row < info.M[a] - width);
+      if (interior && interior_taken)
+        continue;
+      interior_taken = interior_taken || interior;
+      rows[a].push_back(row);
+    }
+  }
+  return rows;
+}
+
+/// Call row_fn(row, cols, values) for the rows (i, j, k) of the folded operator on da, with
+/// i, j and k from rows (DMDA axis order)
 template <typename RowFn>
 void
 forEachFoldedRow(DM da,
@@ -138,6 +180,7 @@ forEachFoldedRow(DM da,
                  PetscReal scale,
                  const FaceGhosts & faces,
                  const std::vector<Real> & h,
+                 const RowIndices & rows,
                  RowFn row_fn)
 {
   const auto info = getInfo(da);
@@ -147,9 +190,9 @@ forEachFoldedRow(DM da,
 
   std::vector<MatStencil> cols;
   std::vector<PetscScalar> values;
-  for (PetscInt k = info.start[2]; k < info.start[2] + info.size[2]; ++k)
-    for (PetscInt j = info.start[1]; j < info.start[1] + info.size[1]; ++j)
-      for (PetscInt i = info.start[0]; i < info.start[0] + info.size[0]; ++i)
+  for (const auto k : rows[2])
+    for (const auto j : rows[1])
+      for (const auto i : rows[0])
       {
         MatStencil row{};
         row.i = i, row.j = j, row.k = k;
@@ -402,6 +445,7 @@ assembleStencilOperator(DM da,
       scale,
       faces,
       h,
+      ownedRows(getInfo(da)),
       [&](const MatStencil & row,
           const std::vector<MatStencil> & cols,
           const std::vector<PetscScalar> & values)
@@ -421,18 +465,24 @@ jacobiSpectrumBound(DM da,
                     const FaceGhosts & faces,
                     const std::vector<Real> & h)
 {
+  // every owned row is a copy of a representative one, so the maximum over those is the
+  // maximum over all owned rows
+  const auto rows = representativeRows(getInfo(da), periodicAxes(da), stencilWidth(stencil));
   Real bound = 0.0;
   forEachFoldedRow(da,
                    stencil,
                    1.0,
                    faces,
                    h,
+                   rows,
                    [&](const MatStencil & row,
                        const std::vector<MatStencil> & cols,
                        const std::vector<PetscScalar> & values)
                    {
-                     // the matrix entries: values on the same column (folded or wrapped)
-                     // are added, as in assembleStencilOperator
+                     // the matrix entries: values folded onto the same column are added, as in
+                     // assembleStencilOperator; periodic columns are not wrapped here, so
+                     // offsets that wrap onto one column are counted separately (still an
+                     // upper bound)
                      std::map<std::array<PetscInt, 3>, Real> row_values;
                      for (const auto q : index_range(cols))
                        row_values[{{cols[q].i, cols[q].j, cols[q].k}}] += values[q];
