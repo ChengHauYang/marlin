@@ -389,7 +389,7 @@
   []
 
   [jacobi_diagonal_bcs]
-    requirement = 'The system shall give the PETSc solver the diagonal of the operator including the boundary face terms, used by a Jacobi preconditioner'
+    requirement = 'The system shall converge a Jacobi-preconditioned conjugate gradient solve with boundary faces in the iteration count that the diagonal including the boundary face terms gives'
     # Jacobi-preconditioned CG takes 164 iterations; with the interior diagonal also in the
     # cells next to a face it takes 95, so the count tells the two apart
     type = RunApp
