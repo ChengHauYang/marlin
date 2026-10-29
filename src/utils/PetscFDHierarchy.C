@@ -535,7 +535,7 @@ createStencilMatrix(DM da, const std::vector<FDStencilEntry> & stencil)
   for (auto & ab : unit_faces.ab)
     ab = {0.0, 1.0};
   assembleStencilOperator(
-      da, stencil, 1.0, unit_faces, std::vector<Real>(getInfo(da).dim, 1.0), preallocator);
+      da, stencil, 1.0, unit_faces, std::vector<Real>(info.dim, 1.0), preallocator);
 
   // preallocate exactly those columns and insert zeros there; any other column is an error
   PetscCallAbort(comm, MatPreallocatorPreallocate(preallocator, PETSC_TRUE, B));
