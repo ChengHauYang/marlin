@@ -52,24 +52,12 @@ TensorRobinBC::TensorRobinBC(const InputParameters & parameters)
                parameters.checkForRename("c_buffer"),
                ".");
 
-  // the ghost value divides by a/2 + b/dx (see ghostCoefficientOnU0); this also rejects a = b = 0
+  // the ghost value divides by a/2 + b/dx (see RobinGhost::coefficientOnU0); this also rejects a =
+  // b = 0
   const auto dx = _domain.getGridSpacing()(faceDim());
   if (std::abs(_a / 2.0 + _b / dx) <= 1e-12 * (std::abs(_a) / 2.0 + std::abs(_b) / dx))
     paramError(
         "a", "a/2 + b/dx must be nonzero (dx = ", dx, " is the grid spacing normal to the face).");
-}
-
-Real
-TensorRobinBC::ghostCoefficientOnU0(Real a, Real b, Real dx)
-{
-  // ughost = [c - u0*(a/2 - b/dx)] / (a/2 + b/dx)  =>  coefficient on u0
-  return -(a / 2.0 - b / dx) / (a / 2.0 + b / dx);
-}
-
-Real
-TensorRobinBC::ghostConstantTerm(Real a, Real b, Real c, Real dx)
-{
-  return c / (a / 2.0 + b / dx);
 }
 
 void
@@ -104,7 +92,7 @@ TensorRobinBC::fillGhostCellsStatic(torch::Tensor & buffer,
   // (2l + 1) dx apart. Each layer applies the Robin relation to that pair, with the central
   // difference over the pair for du/dn. This is exact for linear fields and gives the even
   // mirror ghost_l = u_l for zero flux and the odd mirror ghost_l = 2c - u_l for Dirichlet. The
-  // lower and upper face reduce to the same formula (ghostCoefficientOnU0 / ghostConstantTerm)
+  // lower and upper face reduce to the same formula (RobinGhost::coefficientOnU0 / constantTerm)
   // because the ghost is always the cell on the outward side.
   for (const auto l : make_range(int64_t(ghost_layers)))
   {
@@ -113,8 +101,8 @@ TensorRobinBC::fillGhostCellsStatic(torch::Tensor & buffer,
                                    : buffer.narrow(face_dim, halo + l, 1);
     auto ghost_l = is_upper_face ? buffer.narrow(face_dim, halo + owned_extent + l, 1)
                                  : buffer.narrow(face_dim, halo - 1 - l, 1);
-    ghost_l.copy_(ghostCoefficientOnU0(a, b, spacing) * u_l +
-                  c * ghostConstantTerm(a, b, 1.0, spacing));
+    ghost_l.copy_(RobinGhost::coefficientOnU0(a, b, spacing) * u_l +
+                  c * RobinGhost::constantTerm(a, b, 1.0, spacing));
   }
 }
 

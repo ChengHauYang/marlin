@@ -8,7 +8,7 @@
 #include "PetscFDHierarchy.h"
 #include "FiniteDifferenceLaplacian.h"
 #include "FiniteDifferenceBiharmonic.h"
-#include "TensorRobinBC.h"
+#include "RobinGhost.h"
 #include "gtest/gtest.h"
 
 #include "libmesh/int_range.h"
@@ -541,7 +541,7 @@ TEST(PetscFDHierarchyTest, AssembledOperatorWithFaces)
 }
 
 // A Robin face changes only the diagonal of the 3-point operator next to it, by the
-// ghost coefficient of the explicit ghost fill (TensorRobinBC::ghostCoefficientOnU0), and
+// ghost coefficient of the explicit ghost fill (RobinGhost::coefficientOnU0), and
 // keeps it symmetric.
 TEST(PetscFDHierarchyTest, AssembledOperatorWithRobinFace)
 {
@@ -573,8 +573,8 @@ TEST(PetscFDHierarchyTest, AssembledOperatorWithRobinFace)
       {
         PetscScalar value;
         PetscCallAbort(PETSC_COMM_WORLD, MatGetValues(B, 1, &row, 1, &row, &value));
-        const double coeff = row == 0 ? TensorRobinBC::ghostCoefficientOnU0(2.0, 0.3, dx[0])
-                                      : TensorRobinBC::ghostCoefficientOnU0(1.0, 0.0, dx[0]);
+        const double coeff = row == 0 ? RobinGhost::coefficientOnU0(2.0, 0.3, dx[0])
+                                      : RobinGhost::coefficientOnU0(1.0, 0.0, dx[0]);
         EXPECT_NEAR(value, (2.0 - coeff) / h2, 1e-12 / h2) << "row " << row;
       }
     PetscCallAbort(PETSC_COMM_WORLD, MatDestroy(&B));

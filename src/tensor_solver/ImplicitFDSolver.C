@@ -477,8 +477,8 @@ ImplicitFDSolver::jacobiDiagonal(const Field & field) const
     if (!face_bc || index[d] != (upper ? partitions[d] - 1 : 0))
       continue;
 
-    const auto coeff = TensorRobinBC::ghostCoefficientOnU0(
-        face_bc->a(), face_bc->b(), _domain.getGridSpacing()(d));
+    const auto coeff =
+        RobinGhost::coefficientOnU0(face_bc->a(), face_bc->b(), _domain.getGridSpacing()(d));
     Real across = 0.0;
     for (const auto * fd_op : field._fd_operators)
       for (const auto & entry : fd_op->stencilAt())

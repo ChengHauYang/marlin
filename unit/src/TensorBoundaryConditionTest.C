@@ -17,11 +17,11 @@
 
 // fillGhostCellsStatic() (the ghost fill, which the explicit computes and the implicit
 // solver's fine level both use) and the ghost coefficients the implicit solver writes into
-// its matrices (ghostCoefficientOnU0() in the Jacobi diagonal, PetscFD::FaceGhosts::factor()
+// its matrices (RobinGhost::coefficientOnU0() in the Jacobi diagonal, PetscFD::FaceGhosts::factor()
 // on the coarse multigrid levels) must, for the same (a, b, dx), imply the same dependence
 // of each ghost on its mirror cell, and the ghost value must satisfy the Robin condition
-// itself. The second check is independent of the shared ghostCoefficientOnU0() /
-// ghostConstantTerm() helpers, so a sign error in them is caught.
+// itself. The second check is independent of the shared RobinGhost::coefficientOnU0() /
+// constantTerm() helpers, so a sign error in them is caught.
 namespace
 {
 torch::Tensor
@@ -88,7 +88,7 @@ checkDualPath(Real a, Real b, Real c, Real dx)
           << "a=" << a << " b=" << b << " c=" << c << " dx=" << dx
           << " is_upper_face=" << is_upper_face << " layer=" << l;
       if (l == 0)
-        EXPECT_NEAR(homogeneous, TensorRobinBC::ghostCoefficientOnU0(a, b, dx) * u[0], tolerance);
+        EXPECT_NEAR(homogeneous, RobinGhost::coefficientOnU0(a, b, dx) * u[0], tolerance);
     }
 
     const auto u0 = u[0];

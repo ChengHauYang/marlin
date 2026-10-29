@@ -7,7 +7,7 @@
 /**********************************************************************/
 #include "PetscFDHierarchy.h"
 #include "DomainAction.h"
-#include "TensorRobinBC.h"
+#include "RobinGhost.h"
 
 #include "libmesh/int_range.h"
 
@@ -218,7 +218,7 @@ Real
 FaceGhosts::factor(unsigned int face, unsigned int layer, Real h) const
 {
   // the ghost in layer l and its mirror are (2l + 1) h apart
-  return TensorRobinBC::ghostCoefficientOnU0(ab[face][0], ab[face][1], (2.0 * layer + 1.0) * h);
+  return RobinGhost::coefficientOnU0(ab[face][0], ab[face][1], (2.0 * layer + 1.0) * h);
 }
 
 Partition
