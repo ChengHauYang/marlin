@@ -45,6 +45,26 @@
 
 registerMooseObject("MarlinApp", ImplicitFDSolver);
 
+namespace
+{
+/// holds the boundary data fixed (TensorProblem::beginFixedBoundaryData) for its lifetime,
+/// so that every exit from the solve, an exception included, releases it
+class FixedBoundaryDataGuard
+{
+public:
+  FixedBoundaryDataGuard(TensorProblem & problem, Real time_offset) : _problem(problem)
+  {
+    _problem.beginFixedBoundaryData(time_offset);
+  }
+  ~FixedBoundaryDataGuard() { _problem.endFixedBoundaryData(); }
+  FixedBoundaryDataGuard(const FixedBoundaryDataGuard &) = delete;
+  FixedBoundaryDataGuard & operator=(const FixedBoundaryDataGuard &) = delete;
+
+private:
+  TensorProblem & _problem;
+};
+}
+
 InputParameters
 ImplicitFDSolver::validParams()
 {
@@ -315,7 +335,7 @@ ImplicitFDSolver::substep()
   _is_converged = true;
   // boundary functions are evaluated at the time level of the unknown, t + dt; buffer values
   // are those the explicit computes above wrote, at t
-  _tensor_problem.beginFixedBoundaryData(_sub_dt);
+  const FixedBoundaryDataGuard fixed_boundary_data(_tensor_problem, _sub_dt);
   std::vector<torch::Tensor> u_old;
   for (auto & field : _fields)
   {
@@ -391,7 +411,6 @@ ImplicitFDSolver::substep()
       for (const auto i : index_range(u_old))
         _fields[i]._u = u_old[i];
       _is_converged = false;
-      _tensor_problem.endFixedBoundaryData();
       return;
     }
 
@@ -404,7 +423,6 @@ ImplicitFDSolver::substep()
     _tensor_problem.exchangeGhostLayers(field._name,
                                         _tensor_problem.getBufferGhostLayers(field._name));
   }
-  _tensor_problem.endFixedBoundaryData();
 }
 
 torch::Tensor
