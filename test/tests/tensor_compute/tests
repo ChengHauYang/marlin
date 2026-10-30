@@ -113,6 +113,7 @@
     design = SmoothRectangleCompute.md
     compute_devices = 'cpu cuda mps xpu'
     max_parallel = 1
+    min_slots = 2 # memory heavy
   []
 
   [phase_field_crystal]

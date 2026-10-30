@@ -25,6 +25,7 @@
       input = laplacian3d.i
       csvdiff = laplacian3d_out.csv
       compute_devices = 'cpu cuda mps xpu'
+      min_slots = 2 # memory heavy
       detail = 'using a 3x3x3 stencil.'
     []
     [3d_5x5]
@@ -61,6 +62,7 @@
       input = dirichlet_laplacian_check.i
       csvdiff = dirichlet_laplacian_check_out.csv
       compute_devices = 'cpu cuda mps xpu'
+      min_slots = 2 # memory heavy
       detail = 'and reproduce the discrete Laplacian expected from an initial condition that is consistent with the boundary values up to a small required perturbation.'
     []
     [relaxation]
